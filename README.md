@@ -1,8 +1,1681 @@
+/ModLoader/app/src/main/java/com/modloader/plugin/PluginAPI.java
 
+// File: PluginAPI.java - API Interface for Plugins to Use (200+ lines)
+// Path: /app/src/main/java/com/modloader/plugin/PluginAPI.java
 
-================================================================================
+package com.modloader.plugin;
 
-/storage/emulated/0/AndroidIDEProjects/TerrariaML/main/java/com/modloader/plugin/PluginLoader.java
+import android.app.Activity;
+import android.content.Context;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.view.View;
+import android.widget.Toast;
+import androidx.appcompat.app.AlertDialog;
+
+import com.modloader.util.LogUtils;
+import com.modloader.util.FileUtils;
+import com.modloader.util.PathManager;
+import com.modloader.loader.ModManager;
+import com.modloader.loader.MelonLoaderManager;
+
+import java.io.File;
+import java.util.*;
+
+/**
+ * Plugin API Interface - Provides core TerrariaLoader functionality to plugins
+ * This is the main interface that plugins use to interact with the core application
+ */
+public class PluginAPI {
+    private static final String TAG = "PluginAPI";
+    private final Context context;
+    private final PluginContext pluginContext;
+    
+    public PluginAPI(Context context, PluginContext pluginContext) {
+        this.context = context;
+        this.pluginContext = pluginContext;
+    }
+    
+    // ===== LOGGING API =====
+    
+    /**
+     * Log a message with the plugin's name as tag
+     */
+    public void log(String message) {
+        LogUtils.logUser("[" + pluginContext.getPlugin().getName() + "] " + message);
+    }
+    
+    /**
+     * Log a debug message
+     */
+    public void logDebug(String message) {
+        LogUtils.logDebug("[" + pluginContext.getPlugin().getName() + "] " + message);
+    }
+    
+    /**
+     * Log an error message
+     */
+    public void logError(String message) {
+        LogUtils.logError("[" + pluginContext.getPlugin().getName() + "] " + message);
+    }
+    
+    /**
+     * Log a warning message
+     */
+    public void logWarning(String message) {
+        LogUtils.logWarning("[" + pluginContext.getPlugin().getName() + "] " + message);
+    }
+    
+    // ===== UI API =====
+    
+    /**
+     * Show a toast message
+     */
+    public void showToast(String message) {
+        Toast.makeText(context, message, Toast.LENGTH_SHORT).show();
+    }
+    
+    /**
+     * Show a long toast message
+     */
+    public void showLongToast(String message) {
+        Toast.makeText(context, message, Toast.LENGTH_LONG).show();
+    }
+    
+    /**
+     * Show an alert dialog
+     */
+    public void showAlert(String title, String message) {
+        showAlert(title, message, null);
+    }
+    
+    /**
+     * Show an alert dialog with callback
+     */
+    public void showAlert(String title, String message, Runnable onOk) {
+        if (!(context instanceof Activity)) {
+            showToast(title + ": " + message);
+            return;
+        }
+        
+        AlertDialog.Builder builder = new AlertDialog.Builder(context);
+        builder.setTitle(title)
+               .setMessage(message)
+               .setPositiveButton("OK", (dialog, which) -> {
+                   if (onOk != null) onOk.run();
+               })
+               .show();
+    }
+    
+    /**
+     * Show a confirmation dialog
+     */
+    public void showConfirmation(String title, String message, Runnable onYes, Runnable onNo) {
+        if (!(context instanceof Activity)) {
+            showToast(title + ": " + message);
+            return;
+        }
+        
+        AlertDialog.Builder builder = new AlertDialog.Builder(context);
+        builder.setTitle(title)
+               .setMessage(message)
+               .setPositiveButton("Yes", (dialog, which) -> {
+                   if (onYes != null) onYes.run();
+               })
+               .setNegativeButton("No", (dialog, which) -> {
+                   if (onNo != null) onNo.run();
+               })
+               .show();
+    }
+    
+    /**
+     * Get current activity (may be null)
+     */
+    public Activity getCurrentActivity() {
+        return (context instanceof Activity) ? (Activity) context : null;
+    }
+    
+    // ===== FILE SYSTEM API =====
+    
+    /**
+     * Get plugin's private data directory
+     */
+    public File getPluginDataDir() {
+        return pluginContext.getDataDir();
+    }
+    
+    /**
+     * Get plugin's config directory
+     */
+    public File getPluginConfigDir() {
+        return pluginContext.getConfigDir();
+    }
+    
+    /**
+     * Get TerrariaLoader's base directory
+     */
+    public File getTerrariaLoaderBaseDir() {
+        return PathManager.getGameBaseDir(context, MelonLoaderManager.TERRARIA_PACKAGE);
+    }
+    
+    /**
+     * Get DEX mods directory
+     */
+    public File getDexModsDir() {
+        return PathManager.getDexModsDir(context, MelonLoaderManager.TERRARIA_PACKAGE);
+    }
+    
+    /**
+     * Get DLL mods directory
+     */
+    public File getDllModsDir() {
+        return PathManager.getDllModsDir(context, MelonLoaderManager.TERRARIA_PACKAGE);
+    }
+    
+    /**
+     * Get application logs directory
+     */
+    public File getAppLogsDir() {
+        File baseDir = PathManager.getGameBaseDir(context, MelonLoaderManager.TERRARIA_PACKAGE);
+        return new File(baseDir, "AppLogs");
+    }
+    
+    /**
+     * Copy a file safely
+     */
+    public boolean copyFile(File source, File destination) {
+        return FileUtils.copyFile(source, destination);
+    }
+    
+    /**
+     * Delete a file safely
+     */
+    public boolean deleteFile(File file) {
+        try {
+            return file.delete();
+        } catch (Exception e) {
+            logError("Failed to delete file: " + e.getMessage());
+            return false;
+        }
+    }
+    
+    /**
+     * Create directory if it doesn't exist
+     */
+    public boolean createDirectory(File dir) {
+        return PathManager.ensureDirectoryExists(dir);
+    }
+    
+    /**
+     * Get file size in human readable format
+     */
+    public String formatFileSize(long bytes) {
+        return FileUtils.formatFileSize(bytes);
+    }
+    
+    // ===== MOD MANAGEMENT API =====
+    
+    /**
+     * Get list of installed DEX/JAR mods
+     */
+    public List<File> getDexMods() {
+        try {
+            File dexDir = getDexModsDir();
+            if (!dexDir.exists()) return new ArrayList<>();
+            
+            File[] files = dexDir.listFiles((dir, name) -> {
+                String lower = name.toLowerCase();
+                return lower.endsWith(".dex") || lower.endsWith(".jar");
+            });
+            
+            return files != null ? Arrays.asList(files) : new ArrayList<>();
+        } catch (Exception e) {
+            logError("Failed to get DEX mods: " + e.getMessage());
+            return new ArrayList<>();
+        }
+    }
+    
+    /**
+     * Get list of installed DLL mods
+     */
+    public List<File> getDllMods() {
+        try {
+            File dllDir = getDllModsDir();
+            if (!dllDir.exists()) return new ArrayList<>();
+            
+            File[] files = dllDir.listFiles((dir, name) -> 
+                name.toLowerCase().endsWith(".dll"));
+            
+            return files != null ? Arrays.asList(files) : new ArrayList<>();
+        } catch (Exception e) {
+            logError("Failed to get DLL mods: " + e.getMessage());
+            return new ArrayList<>();
+        }
+    }
+    
+    /**
+     * Check if a mod is enabled
+     */
+    public boolean isModEnabled(File modFile) {
+        return !modFile.getName().toLowerCase().endsWith(".disabled");
+    }
+    
+    /**
+     * Enable/disable a mod
+     */
+    public boolean toggleMod(File modFile, boolean enabled) {
+        try {
+            String currentName = modFile.getName();
+            String newName;
+            
+            if (enabled && currentName.endsWith(".disabled")) {
+                // Enable mod - remove .disabled extension
+                newName = currentName.substring(0, currentName.lastIndexOf(".disabled"));
+            } else if (!enabled && !currentName.endsWith(".disabled")) {
+                // Disable mod - add .disabled extension
+                newName = currentName + ".disabled";
+            } else {
+                // Already in desired state
+                return true;
+            }
+            
+            File newFile = new File(modFile.getParent(), newName);
+            boolean success = modFile.renameTo(newFile);
+            
+            if (success) {
+                log((enabled ? "Enabled" : "Disabled") + " mod: " + currentName);
+            }
+            
+            return success;
+        } catch (Exception e) {
+            logError("Failed to toggle mod: " + e.getMessage());
+            return false;
+        }
+    }
+    
+    /**
+     * Install a mod from file
+     */
+    public boolean installMod(File modFile, String targetName) {
+        try {
+            String fileName = targetName != null ? targetName : modFile.getName();
+            File targetDir;
+            
+            // Determine target directory based on file extension
+            if (fileName.toLowerCase().endsWith(".dll")) {
+                targetDir = getDllModsDir();
+            } else if (fileName.toLowerCase().endsWith(".dex") || fileName.toLowerCase().endsWith(".jar")) {
+                targetDir = getDexModsDir();
+            } else {
+                logError("Unsupported mod file type: " + fileName);
+                return false;
+            }
+            
+            if (!createDirectory(targetDir)) {
+                logError("Failed to create mod directory: " + targetDir.getAbsolutePath());
+                return false;
+            }
+            
+            File targetFile = new File(targetDir, fileName);
+            boolean success = copyFile(modFile, targetFile);
+            
+            if (success) {
+                log("Installed mod: " + fileName);
+                // Trigger hook for mod installation
+                triggerHook(PluginHook.Hooks.MOD_AFTER_LOAD, this, "mod_file", targetFile);
+            }
+            
+            return success;
+        } catch (Exception e) {
+            logError("Failed to install mod: " + e.getMessage());
+            return false;
+        }
+    }
+    
+    /**
+     * Uninstall a mod
+     */
+    public boolean uninstallMod(File modFile) {
+        try {
+            // Trigger hook before uninstalling
+            triggerHook(PluginHook.Hooks.MOD_BEFORE_UNLOAD, this, "mod_file", modFile);
+            
+            boolean success = deleteFile(modFile);
+            
+            if (success) {
+                log("Uninstalled mod: " + modFile.getName());
+                // Trigger hook after uninstalling
+                triggerHook(PluginHook.Hooks.MOD_AFTER_UNLOAD, this, "mod_file", modFile);
+            }
+            
+            return success;
+        } catch (Exception e) {
+            logError("Failed to uninstall mod: " + e.getMessage());
+            return false;
+        }
+    }
+    
+    /**
+     * Get mod count statistics
+     */
+    public ModStats getModStats() {
+        ModStats stats = new ModStats();
+        
+        // Count DEX mods
+        List<File> dexMods = getDexMods();
+        File dexDir = getDexModsDir();
+        if (dexDir.exists()) {
+            File[] allDexFiles = dexDir.listFiles((dir, name) -> {
+                String lower = name.toLowerCase();
+                return lower.endsWith(".dex") || lower.endsWith(".jar") || 
+                       lower.endsWith(".dex.disabled") || lower.endsWith(".jar.disabled");
+            });
+            
+            if (allDexFiles != null) {
+                stats.totalDexMods = allDexFiles.length;
+                for (File mod : allDexFiles) {
+                    if (isModEnabled(mod)) {
+                        stats.enabledDexMods++;
+                    }
+                }
+            }
+        }
+        
+        // Count DLL mods
+        File dllDir = getDllModsDir();
+        if (dllDir.exists()) {
+            File[] allDllFiles = dllDir.listFiles((dir, name) -> {
+                String lower = name.toLowerCase();
+                return lower.endsWith(".dll") || lower.endsWith(".dll.disabled");
+            });
+            
+            if (allDllFiles != null) {
+                stats.totalDllMods = allDllFiles.length;
+                for (File mod : allDllFiles) {
+                    if (isModEnabled(mod)) {
+                        stats.enabledDllMods++;
+                    }
+                }
+            }
+        }
+        
+        return stats;
+    }
+    
+    // ===== CONFIGURATION API =====
+    
+    /**
+     * Get plugin's shared preferences
+     */
+    public SharedPreferences getPluginPreferences() {
+        return context.getSharedPreferences("plugin_" + pluginContext.getPlugin().getId(), 
+                                           Context.MODE_PRIVATE);
+    }
+    
+    /**
+     * Save a plugin setting
+     */
+    public void setSetting(String key, String value) {
+        getPluginPreferences().edit().putString(key, value).apply();
+        triggerHook(PluginHook.Hooks.SETTINGS_CHANGE, this, "key", key);
+    }
+    
+    /**
+     * Save a plugin setting (boolean)
+     */
+    public void setSetting(String key, boolean value) {
+        getPluginPreferences().edit().putBoolean(key, value).apply();
+        triggerHook(PluginHook.Hooks.SETTINGS_CHANGE, this, "key", key);
+    }
+    
+    /**
+     * Save a plugin setting (int)
+     */
+    public void setSetting(String key, int value) {
+        getPluginPreferences().edit().putInt(key, value).apply();
+        triggerHook(PluginHook.Hooks.SETTINGS_CHANGE, this, "key", key);
+    }
+    
+    /**
+     * Save a plugin setting (float)
+     */
+    public void setSetting(String key, float value) {
+        getPluginPreferences().edit().putFloat(key, value).apply();
+        triggerHook(PluginHook.Hooks.SETTINGS_CHANGE, this, "key", key);
+    }
+    
+    /**
+     * Get a plugin setting
+     */
+    public String getSetting(String key, String defaultValue) {
+        return getPluginPreferences().getString(key, defaultValue);
+    }
+    
+    /**
+     * Get a plugin setting (boolean)
+     */
+    public boolean getSetting(String key, boolean defaultValue) {
+        return getPluginPreferences().getBoolean(key, defaultValue);
+    }
+    
+    /**
+     * Get a plugin setting (int)
+     */
+    public int getSetting(String key, int defaultValue) {
+        return getPluginPreferences().getInt(key, defaultValue);
+    }
+    
+    /**
+     * Get a plugin setting (float)
+     */
+    public float getSetting(String key, float defaultValue) {
+        return getPluginPreferences().getFloat(key, defaultValue);
+    }
+    
+    /**
+     * Clear all plugin settings
+     */
+    public void clearAllSettings() {
+        getPluginPreferences().edit().clear().apply();
+        triggerHook(PluginHook.Hooks.SETTINGS_RESET, this);
+    }
+    
+    // ===== HOOK SYSTEM API =====
+    
+    /**
+     * Register a hook listener
+     */
+    public void registerHook(String hookName, PluginHook.HookListener listener) {
+        PluginHook.getInstance().registerHook(hookName, listener);
+        pluginContext.addHookListener(hookName, listener);
+    }
+    
+    /**
+     * Trigger a hook
+     */
+    public void triggerHook(String hookName, Object source) {
+        PluginHook.getInstance().triggerHook(hookName, source);
+    }
+    
+    /**
+     * Trigger a hook with data
+     */
+    public void triggerHook(String hookName, Object source, String key, Object value) {
+        PluginHook.trigger(hookName, source, key, value);
+    }
+    
+    /**
+     * Trigger a hook with multiple data items
+     */
+    public void triggerHook(String hookName, Object source, Map<String, Object> data) {
+        PluginHook.getInstance().triggerHook(hookName, source, data);
+    }
+    
+    // ===== SYSTEM INFORMATION API =====
+    
+    /**
+     * Check if MelonLoader is installed
+     */
+    public boolean isMelonLoaderInstalled() {
+        return MelonLoaderManager.isMelonLoaderInstalled(context, MelonLoaderManager.TERRARIA_PACKAGE);
+    }
+    
+    /**
+     * Check if LemonLoader is installed
+     */
+    public boolean isLemonLoaderInstalled() {
+        return MelonLoaderManager.isLemonLoaderInstalled(context, MelonLoaderManager.TERRARIA_PACKAGE);
+    }
+    
+    /**
+     * Get TerrariaLoader version
+     */
+    public String getTerrariaLoaderVersion() {
+        try {
+            return context.getPackageManager()
+                         .getPackageInfo(context.getPackageName(), 0)
+                         .versionName;
+        } catch (Exception e) {
+            return "Unknown";
+        }
+    }
+    
+    /**
+     * Get Android version
+     */
+    public String getAndroidVersion() {
+        return android.os.Build.VERSION.RELEASE;
+    }
+    
+    /**
+     * Get device information
+     */
+    public String getDeviceInfo() {
+        return android.os.Build.MANUFACTURER + " " + android.os.Build.MODEL;
+    }
+    
+    /**
+     * Get plugin system status
+     */
+    public String getPluginSystemStatus() {
+        StringBuilder status = new StringBuilder();
+        status.append("=== Plugin System Status ===\n");
+        status.append("Plugin: ").append(pluginContext.getPlugin().getName()).append("\n");
+        status.append("Version: ").append(pluginContext.getPlugin().getVersion()).append("\n");
+        status.append("TerrariaLoader Version: ").append(getTerrariaLoaderVersion()).append("\n");
+        status.append("Android Version: ").append(getAndroidVersion()).append("\n");
+        status.append("Device: ").append(getDeviceInfo()).append("\n");
+        status.append("MelonLoader: ").append(isMelonLoaderInstalled() ? "Installed" : "Not Installed").append("\n");
+        
+        ModStats stats = getModStats();
+        status.append("DEX Mods: ").append(stats.enabledDexMods).append("/").append(stats.totalDexMods).append("\n");
+        status.append("DLL Mods: ").append(stats.enabledDllMods).append("/").append(stats.totalDllMods).append("\n");
+        
+        return status.toString();
+    }
+    
+    // ===== ACTIVITY INTEGRATION API =====
+    
+    /**
+     * Start an activity
+     */
+    public void startActivity(Class<?> activityClass) {
+        try {
+            Intent intent = new Intent(context, activityClass);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            context.startActivity(intent);
+        } catch (Exception e) {
+            logError("Failed to start activity: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Start an activity with extras
+     */
+    public void startActivity(Class<?> activityClass, Map<String, String> extras) {
+        try {
+            Intent intent = new Intent(context, activityClass);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            if (extras != null) {
+                for (Map.Entry<String, String> entry : extras.entrySet()) {
+                    intent.putExtra(entry.getKey(), entry.getValue());
+                }
+            }
+            context.startActivity(intent);
+        } catch (Exception e) {
+            logError("Failed to start activity: " + e.getMessage());
+        }
+    }
+    
+    // ===== UTILITY METHODS =====
+    
+    /**
+     * Execute a task in background thread
+     */
+    public void executeAsync(Runnable task) {
+        new Thread(() -> {
+            try {
+                task.run();
+            } catch (Exception e) {
+                logError("Async task failed: " + e.getMessage());
+            }
+        }).start();
+    }
+    
+    /**
+     * Execute a task on UI thread
+     */
+    public void executeOnUI(Runnable task) {
+        Activity activity = getCurrentActivity();
+        if (activity != null) {
+            activity.runOnUiThread(task);
+        }
+    }
+    
+    /**
+     * Schedule a delayed task
+     */
+    public void scheduleTask(Runnable task, long delayMs) {
+        new Thread(() -> {
+            try {
+                Thread.sleep(delayMs);
+                task.run();
+            } catch (Exception e) {
+                logError("Scheduled task failed: " + e.getMessage());
+            }
+        }).start();
+    }
+    
+    // ===== HELPER CLASSES =====
+    
+    /**
+     * Mod statistics container
+     */
+    public static class ModStats {
+        public int totalDexMods = 0;
+        public int enabledDexMods = 0;
+        public int totalDllMods = 0;
+        public int enabledDllMods = 0;
+        
+        public int getTotalMods() {
+            return totalDexMods + totalDllMods;
+        }
+        
+        public int getTotalEnabled() {
+            return enabledDexMods + enabledDllMods;
+        }
+        
+        public int getTotalDisabled() {
+            return getTotalMods() - getTotalEnabled();
+        }
+        
+        @Override
+        public String toString() {
+            return String.format("ModStats[Total: %d, Enabled: %d, Disabled: %d, DEX: %d/%d, DLL: %d/%d]",
+                getTotalMods(), getTotalEnabled(), getTotalDisabled(),
+                enabledDexMods, totalDexMods, enabledDllMods, totalDllMods);
+        }
+    }
+}
+
+--------------------------------------------------------------------------------
+/ModLoader/app/src/main/java/com/modloader/plugin/PluginContext.java
+
+// File: PluginContext.java - Context and Utilities for Plugins with Hook Management (250+ lines)
+// Path: /app/src/main/java/com/modloader/plugin/PluginContext.java
+
+package com.modloader.plugin;
+
+import android.content.Context;
+import com.modloader.util.LogUtils;
+import com.modloader.util.PathManager;
+
+import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
+
+/**
+ * Plugin Context - Provides context and utilities for plugins
+ * Manages plugin lifecycle, configuration, and hook registration
+ */
+public class PluginContext {
+    private static final String TAG = "PluginContext";
+    
+    private final Plugin plugin;
+    private final Context androidContext;
+    private final PluginManager pluginManager;
+    private final PluginAPI api;
+    
+    // Plugin directories
+    private File dataDir;
+    private File configDir;
+    private File cacheDir;
+    private File logsDir;
+    
+    // Plugin state
+    private boolean initialized = false;
+    private boolean enabled = true;
+    private long loadTime;
+    private final Map<String, Object> contextData = new ConcurrentHashMap<>();
+    
+    // Hook management
+    private final Map<String, List<PluginHook.HookListener>> registeredHooks = new ConcurrentHashMap<>();
+    private final List<String> subscribedHooks = new CopyOnWriteArrayList<>();
+    
+    // Plugin resources
+    private final Map<String, Object> resources = new ConcurrentHashMap<>();
+    private final List<AutoCloseable> closeableResources = new CopyOnWriteArrayList<>();
+    
+    // Event listeners
+    private final List<PluginEventListener> eventListeners = new CopyOnWriteArrayList<>();
+    
+    /**
+     * Plugin event listener interface
+     */
+    public interface PluginEventListener {
+        void onPluginEvent(PluginEvent event);
+    }
+    
+    /**
+     * Plugin event types
+     */
+    public enum PluginEventType {
+        LOADING,
+        LOADED,
+        ENABLING,
+        ENABLED,
+        DISABLING,
+        DISABLED,
+        UNLOADING,
+        UNLOADED,
+        ERROR,
+        HOOK_REGISTERED,
+        HOOK_UNREGISTERED,
+        CONFIG_CHANGED
+    }
+    
+    /**
+     * Plugin event data
+     */
+    public static class PluginEvent {
+        private final PluginEventType type;
+        private final PluginContext context;
+        private final String message;
+        private final Object data;
+        private final long timestamp;
+        
+        public PluginEvent(PluginEventType type, PluginContext context, String message, Object data) {
+            this.type = type;
+            this.context = context;
+            this.message = message;
+            this.data = data;
+            this.timestamp = System.currentTimeMillis();
+        }
+        
+        public PluginEventType getType() { return type; }
+        public PluginContext getContext() { return context; }
+        public String getMessage() { return message; }
+        public Object getData() { return data; }
+        public long getTimestamp() { return timestamp; }
+    }
+    
+    public PluginContext(Plugin plugin, Context androidContext, PluginManager pluginManager) {
+        this.plugin = plugin;
+        this.androidContext = androidContext;
+        this.pluginManager = pluginManager;
+        this.api = new PluginAPI(androidContext, this);
+        this.loadTime = System.currentTimeMillis();
+        
+        initializeDirectories();
+        fireEvent(PluginEventType.LOADING, "Plugin context created", null);
+        
+        LogUtils.logDebug("Created plugin context for: " + plugin.getName());
+    }
+    
+    /**
+     * Initialize plugin directories
+     */
+    private void initializeDirectories() {
+        try {
+            File pluginsBaseDir = getPluginsBaseDirectory();
+            String pluginDirName = sanitizeFileName(plugin.getId());
+            
+            // Create main plugin directory
+            File pluginMainDir = new File(pluginsBaseDir, pluginDirName);
+            PathManager.ensureDirectoryExists(pluginMainDir);
+            
+            // Create subdirectories
+            dataDir = new File(pluginMainDir, "data");
+            configDir = new File(pluginMainDir, "config");
+            cacheDir = new File(pluginMainDir, "cache");
+            logsDir = new File(pluginMainDir, "logs");
+            
+            PathManager.ensureDirectoryExists(dataDir);
+            PathManager.ensureDirectoryExists(configDir);
+            PathManager.ensureDirectoryExists(cacheDir);
+            PathManager.ensureDirectoryExists(logsDir);
+            
+            LogUtils.logDebug("Initialized directories for plugin: " + plugin.getId());
+            
+        } catch (Exception e) {
+            LogUtils.logError("Failed to initialize plugin directories: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Get base plugins directory
+     */
+    private File getPluginsBaseDirectory() {
+        File baseDir = PathManager.getGameBaseDir(androidContext, "com.and.games505.TerrariaPaid");
+        return new File(baseDir, "Plugins");
+    }
+    
+    /**
+     * Sanitize filename for directory creation
+     */
+    private String sanitizeFileName(String name) {
+        return name.replaceAll("[^a-zA-Z0-9._-]", "_").toLowerCase();
+    }
+    
+    // ===== GETTERS =====
+    
+    public Plugin getPlugin() {
+        return plugin;
+    }
+    
+    public Context getAndroidContext() {
+        return androidContext;
+    }
+    
+    public PluginManager getPluginManager() {
+        return pluginManager;
+    }
+    
+    public PluginAPI getAPI() {
+        return api;
+    }
+    
+    public File getDataDir() {
+        return dataDir;
+    }
+    
+    public File getConfigDir() {
+        return configDir;
+    }
+    
+    public File getCacheDir() {
+        return cacheDir;
+    }
+    
+    public File getLogsDir() {
+        return logsDir;
+    }
+    
+    public boolean isInitialized() {
+        return initialized;
+    }
+    
+    public boolean isEnabled() {
+        return enabled;
+    }
+    
+    public long getLoadTime() {
+        return loadTime;
+    }
+    
+    // ===== PLUGIN STATE MANAGEMENT =====
+    
+    /**
+     * Initialize the plugin
+     */
+    public boolean initialize() {
+        if (initialized) {
+            return true;
+        }
+        
+        try {
+            fireEvent(PluginEventType.LOADING, "Initializing plugin", null);
+            
+            // Call plugin's onLoad method
+            plugin.onLoad(this);
+            
+            initialized = true;
+            fireEvent(PluginEventType.LOADED, "Plugin loaded successfully", null);
+            
+            LogUtils.logUser("Plugin loaded: " + plugin.getName() + " v" + plugin.getVersion());
+            return true;
+            
+        } catch (Exception e) {
+            LogUtils.logError("Failed to initialize plugin " + plugin.getName() + ": " + e.getMessage());
+            fireEvent(PluginEventType.ERROR, "Initialization failed", e);
+            return false;
+        }
+    }
+    
+    /**
+     * Enable the plugin
+     */
+    public boolean enable() {
+        if (!initialized) {
+            LogUtils.logError("Cannot enable uninitialized plugin: " + plugin.getName());
+            return false;
+        }
+        
+        if (enabled) {
+            return true;
+        }
+        
+        try {
+            fireEvent(PluginEventType.ENABLING, "Enabling plugin", null);
+            
+            // Call plugin's onEnable method
+            plugin.onEnable(this);
+            
+            enabled = true;
+            fireEvent(PluginEventType.ENABLED, "Plugin enabled successfully", null);
+            
+            LogUtils.logUser("Plugin enabled: " + plugin.getName());
+            return true;
+            
+        } catch (Exception e) {
+            LogUtils.logError("Failed to enable plugin " + plugin.getName() + ": " + e.getMessage());
+            fireEvent(PluginEventType.ERROR, "Enable failed", e);
+            return false;
+        }
+    }
+    
+    /**
+     * Disable the plugin
+     */
+    public boolean disable() {
+        if (!enabled) {
+            return true;
+        }
+        
+        try {
+            fireEvent(PluginEventType.DISABLING, "Disabling plugin", null);
+            
+            // Call plugin's onDisable method
+            plugin.onDisable(this);
+            
+            enabled = false;
+            fireEvent(PluginEventType.DISABLED, "Plugin disabled successfully", null);
+            
+            LogUtils.logUser("Plugin disabled: " + plugin.getName());
+            return true;
+            
+        } catch (Exception e) {
+            LogUtils.logError("Failed to disable plugin " + plugin.getName() + ": " + e.getMessage());
+            fireEvent(PluginEventType.ERROR, "Disable failed", e);
+            return false;
+        }
+    }
+    
+    /**
+     * Unload the plugin
+     */
+    public boolean unload() {
+        try {
+            fireEvent(PluginEventType.UNLOADING, "Unloading plugin", null);
+            
+            // Disable first if enabled
+            if (enabled) {
+                disable();
+            }
+            
+            // Clean up hooks
+            unregisterAllHooks();
+            
+            // Close resources
+            closeAllResources();
+            
+            // Call plugin's onUnload method
+            if (initialized) {
+                plugin.onUnload(this);
+            }
+            
+            initialized = false;
+            fireEvent(PluginEventType.UNLOADED, "Plugin unloaded successfully", null);
+            
+            LogUtils.logUser("Plugin unloaded: " + plugin.getName());
+            return true;
+            
+        } catch (Exception e) {
+            LogUtils.logError("Failed to unload plugin " + plugin.getName() + ": " + e.getMessage());
+            fireEvent(PluginEventType.ERROR, "Unload failed", e);
+            return false;
+        }
+    }
+    
+    // ===== HOOK MANAGEMENT =====
+    
+    /**
+     * Add a hook listener (called by PluginAPI)
+     */
+    public void addHookListener(String hookName, PluginHook.HookListener listener) {
+        registeredHooks.computeIfAbsent(hookName, k -> new CopyOnWriteArrayList<>()).add(listener);
+        if (!subscribedHooks.contains(hookName)) {
+            subscribedHooks.add(hookName);
+        }
+        fireEvent(PluginEventType.HOOK_REGISTERED, "Registered hook: " + hookName, hookName);
+        LogUtils.logDebug("Plugin " + plugin.getName() + " registered hook: " + hookName);
+    }
+    
+    /**
+     * Remove a hook listener
+     */
+    public void removeHookListener(String hookName, PluginHook.HookListener listener) {
+        List<PluginHook.HookListener> listeners = registeredHooks.get(hookName);
+        if (listeners != null) {
+            listeners.remove(listener);
+            if (listeners.isEmpty()) {
+                registeredHooks.remove(hookName);
+                subscribedHooks.remove(hookName);
+            }
+            PluginHook.getInstance().unregisterHook(hookName, listener);
+            fireEvent(PluginEventType.HOOK_UNREGISTERED, "Unregistered hook: " + hookName, hookName);
+            LogUtils.logDebug("Plugin " + plugin.getName() + " unregistered hook: " + hookName);
+        }
+    }
+    
+    /**
+     * Unregister all hooks for this plugin
+     */
+    public void unregisterAllHooks() {
+        for (Map.Entry<String, List<PluginHook.HookListener>> entry : registeredHooks.entrySet()) {
+            String hookName = entry.getKey();
+            for (PluginHook.HookListener listener : entry.getValue()) {
+                PluginHook.getInstance().unregisterHook(hookName, listener);
+            }
+        }
+        registeredHooks.clear();
+        subscribedHooks.clear();
+        LogUtils.logDebug("Unregistered all hooks for plugin: " + plugin.getName());
+    }
+    
+    /**
+     * Get registered hooks for this plugin
+     */
+    public Set<String> getRegisteredHooks() {
+        return new HashSet<>(subscribedHooks);
+    }
+    
+    // ===== CONTEXT DATA MANAGEMENT =====
+    
+    /**
+     * Store context data
+     */
+    public void setData(String key, Object value) {
+        contextData.put(key, value);
+    }
+    
+    /**
+     * Get context data
+     */
+    @SuppressWarnings("unchecked")
+    public <T> T getData(String key, Class<T> type) {
+        Object value = contextData.get(key);
+        if (value != null && type.isInstance(value)) {
+            return (T) value;
+        }
+        return null;
+    }
+    
+    /**
+     * Get context data with default value
+     */
+    @SuppressWarnings("unchecked")
+    public <T> T getData(String key, Class<T> type, T defaultValue) {
+        T value = getData(key, type);
+        return value != null ? value : defaultValue;
+    }
+    
+    /**
+     * Check if context data exists
+     */
+    public boolean hasData(String key) {
+        return contextData.containsKey(key);
+    }
+    
+    /**
+     * Remove context data
+     */
+    public void removeData(String key) {
+        contextData.remove(key);
+    }
+    
+    /**
+     * Clear all context data
+     */
+    public void clearData() {
+        contextData.clear();
+    }
+    
+    // ===== RESOURCE MANAGEMENT =====
+    
+    /**
+     * Store a resource
+     */
+    public void setResource(String key, Object resource) {
+        resources.put(key, resource);
+        if (resource instanceof AutoCloseable) {
+            closeableResources.add((AutoCloseable) resource);
+        }
+    }
+    
+    /**
+     * Get a resource
+     */
+    @SuppressWarnings("unchecked")
+    public <T> T getResource(String key, Class<T> type) {
+        Object resource = resources.get(key);
+        if (resource != null && type.isInstance(resource)) {
+            return (T) resource;
+        }
+        return null;
+    }
+    
+    /**
+     * Remove a resource
+     */
+    public void removeResource(String key) {
+        Object resource = resources.remove(key);
+        if (resource instanceof AutoCloseable) {
+            closeableResources.remove(resource);
+            try {
+                ((AutoCloseable) resource).close();
+            } catch (Exception e) {
+                LogUtils.logDebug("Error closing resource: " + e.getMessage());
+            }
+        }
+    }
+    
+    /**
+     * Close all resources
+     */
+    private void closeAllResources() {
+        for (AutoCloseable resource : closeableResources) {
+            try {
+                resource.close();
+            } catch (Exception e) {
+                LogUtils.logDebug("Error closing resource: " + e.getMessage());
+            }
+        }
+        closeableResources.clear();
+        resources.clear();
+    }
+    
+    // ===== EVENT SYSTEM =====
+    
+    /**
+     * Add event listener
+     */
+    public void addEventListener(PluginEventListener listener) {
+        eventListeners.add(listener);
+    }
+    
+    /**
+     * Remove event listener
+     */
+    public void removeEventListener(PluginEventListener listener) {
+        eventListeners.remove(listener);
+    }
+    
+    /**
+     * Fire plugin event
+     */
+    private void fireEvent(PluginEventType type, String message, Object data) {
+        PluginEvent event = new PluginEvent(type, this, message, data);
+        
+        // Notify internal listeners
+        for (PluginEventListener listener : eventListeners) {
+            try {
+                listener.onPluginEvent(event);
+            } catch (Exception e) {
+                LogUtils.logDebug("Error in plugin event listener: " + e.getMessage());
+            }
+        }
+        
+        // Notify plugin manager
+        if (pluginManager != null) {
+            pluginManager.onPluginEvent(event);
+        }
+    }
+    
+    // ===== LOGGING UTILITIES =====
+    
+    /**
+     * Write to plugin log file
+     */
+    public void writeToLogFile(String message) {
+        try {
+            File logFile = new File(logsDir, "plugin.log");
+            try (FileWriter writer = new FileWriter(logFile, true)) {
+                writer.write(new Date().toString() + " - " + message + "\n");
+            }
+        } catch (IOException e) {
+            LogUtils.logDebug("Failed to write to plugin log: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Create plugin-specific log file
+     */
+    public File createLogFile(String filename) {
+        File logFile = new File(logsDir, filename);
+        try {
+            logFile.createNewFile();
+            return logFile;
+        } catch (IOException e) {
+            LogUtils.logDebug("Failed to create log file: " + e.getMessage());
+            return null;
+        }
+    }
+    
+    // ===== CONFIGURATION UTILITIES =====
+    
+    /**
+     * Create config file
+     */
+    public File createConfigFile(String filename) {
+        File configFile = new File(configDir, filename);
+        try {
+            configFile.createNewFile();
+            fireEvent(PluginEventType.CONFIG_CHANGED, "Config file created: " + filename, configFile);
+            return configFile;
+        } catch (IOException e) {
+            LogUtils.logDebug("Failed to create config file: " + e.getMessage());
+            return null;
+        }
+    }
+    
+    /**
+     * Get config file
+     */
+    public File getConfigFile(String filename) {
+        return new File(configDir, filename);
+    }
+    
+    /**
+     * Check if config file exists
+     */
+    public boolean hasConfigFile(String filename) {
+        return new File(configDir, filename).exists();
+    }
+    
+    // ===== STATUS AND DEBUGGING =====
+    
+    /**
+     * Get plugin context status
+     */
+    public String getContextStatus() {
+        StringBuilder status = new StringBuilder();
+        status.append("=== Plugin Context Status ===\n");
+        status.append("Plugin: ").append(plugin.getName()).append(" (").append(plugin.getId()).append(")\n");
+        status.append("Version: ").append(plugin.getVersion()).append("\n");
+        status.append("Initialized: ").append(initialized).append("\n");
+        status.append("Enabled: ").append(enabled).append("\n");
+        status.append("Load Time: ").append(new Date(loadTime)).append("\n");
+        status.append("Uptime: ").append((System.currentTimeMillis() - loadTime) / 1000).append("s\n");
+        status.append("Data Directory: ").append(dataDir.getAbsolutePath()).append("\n");
+        status.append("Registered Hooks: ").append(subscribedHooks.size()).append("\n");
+        status.append("Context Data Items: ").append(contextData.size()).append("\n");
+        status.append("Resources: ").append(resources.size()).append("\n");
+        status.append("Event Listeners: ").append(eventListeners.size()).append("\n");
+        
+        if (!subscribedHooks.isEmpty()) {
+            status.append("Active Hooks: ").append(String.join(", ", subscribedHooks)).append("\n");
+        }
+        
+        return status.toString();
+    }
+    
+    /**
+     * Get plugin statistics
+     */
+    public Map<String, Object> getStatistics() {
+        Map<String, Object> stats = new HashMap<>();
+        stats.put("initialized", initialized);
+        stats.put("enabled", enabled);
+        stats.put("loadTime", loadTime);
+        stats.put("uptime", System.currentTimeMillis() - loadTime);
+        stats.put("hookCount", subscribedHooks.size());
+        stats.put("dataCount", contextData.size());
+        stats.put("resourceCount", resources.size());
+        stats.put("listenerCount", eventListeners.size());
+        return stats;
+    }
+    
+    /**
+     * Cleanup method called during plugin unload
+     */
+    public void cleanup() {
+        try {
+            unregisterAllHooks();
+            closeAllResources();
+            contextData.clear();
+            eventListeners.clear();
+            LogUtils.logDebug("Cleaned up plugin context for: " + plugin.getName());
+        } catch (Exception e) {
+            LogUtils.logError("Error during plugin context cleanup: " + e.getMessage());
+        }
+    }
+}
+
+--------------------------------------------------------------------------------
+/ModLoader/app/src/main/java/com/modloader/plugin/PluginHook.java
+
+// File: PluginHook.java - Hook System for Core App Integration (150+ lines)
+// Path: /app/src/main/java/com/modloader/plugin/PluginHook.java
+
+package com.modloader.plugin;
+
+import android.content.Context;
+import com.modloader.util.LogUtils;
+import java.lang.reflect.Method;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
+
+/**
+ * Plugin Hook System for Core App Integration
+ * Provides hooks into TerrariaLoader's core functionality for plugins
+ */
+public class PluginHook {
+    private static final String TAG = "PluginHook";
+    
+    // Hook priority levels
+    public enum Priority {
+        LOWEST(0),
+        LOW(25),
+        NORMAL(50),
+        HIGH(75),
+        HIGHEST(100);
+        
+        private final int value;
+        Priority(int value) { this.value = value; }
+        public int getValue() { return value; }
+    }
+    
+    // Hook listener interface
+    public interface HookListener {
+        void onEvent(HookEvent event);
+        default Priority getPriority() { return Priority.NORMAL; }
+    }
+    
+    // Hook event data container
+    public static class HookEvent {
+        private final String name;
+        private final Object source;
+        private final Map<String, Object> data;
+        private boolean cancelled = false;
+        
+        public HookEvent(String name, Object source) {
+            this.name = name;
+            this.source = source;
+            this.data = new HashMap<>();
+        }
+        
+        public String getName() { return name; }
+        public Object getSource() { return source; }
+        public Map<String, Object> getData() { return data; }
+        
+        public void putData(String key, Object value) { data.put(key, value); }
+        public Object getData(String key) { return data.get(key); }
+        
+        public boolean isCancelled() { return cancelled; }
+        public void setCancelled(boolean cancelled) { this.cancelled = cancelled; }
+        
+        @SuppressWarnings("unchecked")
+        public <T> T getData(String key, Class<T> type) {
+            Object value = data.get(key);
+            if (value != null && type.isInstance(value)) {
+                return (T) value;
+            }
+            return null;
+        }
+    }
+    
+    // Hook manager - singleton instance
+    private static PluginHook instance;
+    private final Map<String, List<HookListener>> hooks = new ConcurrentHashMap<>();
+    private final Map<String, Integer> hookCallCounts = new ConcurrentHashMap<>();
+    private boolean debugMode = false;
+    
+    // Core hook names - these are the hooks available to plugins
+    public static final class Hooks {
+        // Application lifecycle hooks
+        public static final String APP_STARTUP = "app.startup";
+        public static final String APP_SHUTDOWN = "app.shutdown";
+        public static final String ACTIVITY_CREATE = "activity.create";
+        public static final String ACTIVITY_RESUME = "activity.resume";
+        public static final String ACTIVITY_PAUSE = "activity.pause";
+        
+        // Mod loading hooks
+        public static final String MOD_BEFORE_LOAD = "mod.before_load";
+        public static final String MOD_AFTER_LOAD = "mod.after_load";
+        public static final String MOD_BEFORE_UNLOAD = "mod.before_unload";
+        public static final String MOD_AFTER_UNLOAD = "mod.after_unload";
+        public static final String MOD_ENABLE = "mod.enable";
+        public static final String MOD_DISABLE = "mod.disable";
+        
+        // APK processing hooks
+        public static final String APK_BEFORE_PATCH = "apk.before_patch";
+        public static final String APK_AFTER_PATCH = "apk.after_patch";
+        public static final String APK_BEFORE_INSTALL = "apk.before_install";
+        public static final String APK_AFTER_INSTALL = "apk.after_install";
+        public static final String APK_VALIDATION = "apk.validation";
+        
+        // Loader system hooks
+        public static final String LOADER_BEFORE_INSTALL = "loader.before_install";
+        public static final String LOADER_AFTER_INSTALL = "loader.after_install";
+        public static final String LOADER_CONFIG_CHANGE = "loader.config_change";
+        
+        // UI hooks
+        public static final String UI_MENU_CREATE = "ui.menu_create";
+        public static final String UI_BUTTON_CLICK = "ui.button_click";
+        public static final String UI_DIALOG_SHOW = "ui.dialog_show";
+        public static final String UI_THEME_CHANGE = "ui.theme_change";
+        
+        // File system hooks
+        public static final String FILE_BEFORE_COPY = "file.before_copy";
+        public static final String FILE_AFTER_COPY = "file.after_copy";
+        public static final String FILE_BEFORE_DELETE = "file.before_delete";
+        public static final String FILE_AFTER_DELETE = "file.after_delete";
+        
+        // Log system hooks
+        public static final String LOG_MESSAGE = "log.message";
+        public static final String LOG_ERROR = "log.error";
+        public static final String LOG_DEBUG = "log.debug";
+        
+        // Settings hooks
+        public static final String SETTINGS_CHANGE = "settings.change";
+        public static final String SETTINGS_RESET = "settings.reset";
+        public static final String PERMISSION_CHANGE = "permission.change";
+    }
+    
+    private PluginHook() {
+        LogUtils.logDebug("PluginHook system initialized");
+    }
+    
+    public static synchronized PluginHook getInstance() {
+        if (instance == null) {
+            instance = new PluginHook();
+        }
+        return instance;
+    }
+    
+    /**
+     * Register a hook listener for specific hook
+     */
+    public void registerHook(String hookName, HookListener listener) {
+        if (hookName == null || listener == null) {
+            LogUtils.logDebug("Cannot register null hook or listener");
+            return;
+        }
+        
+        hooks.computeIfAbsent(hookName, k -> new CopyOnWriteArrayList<>()).add(listener);
+        
+        // Sort by priority (highest first)
+        hooks.get(hookName).sort((a, b) -> 
+            Integer.compare(b.getPriority().getValue(), a.getPriority().getValue()));
+        
+        if (debugMode) {
+            LogUtils.logDebug("Registered hook listener for: " + hookName + 
+                " (Priority: " + listener.getPriority() + ")");
+        }
+    }
+    
+    /**
+     * Unregister a hook listener
+     */
+    public void unregisterHook(String hookName, HookListener listener) {
+        List<HookListener> listeners = hooks.get(hookName);
+        if (listeners != null) {
+            listeners.remove(listener);
+            if (listeners.isEmpty()) {
+                hooks.remove(hookName);
+            }
+            if (debugMode) {
+                LogUtils.logDebug("Unregistered hook listener for: " + hookName);
+            }
+        }
+    }
+    
+    /**
+     * Trigger a hook with event data
+     */
+    public HookEvent triggerHook(String hookName, Object source, Map<String, Object> data) {
+        HookEvent event = new HookEvent(hookName, source);
+        if (data != null) {
+            event.getData().putAll(data);
+        }
+        
+        return triggerHook(event);
+    }
+    
+    /**
+     * Trigger a hook with just hook name and source
+     */
+    public HookEvent triggerHook(String hookName, Object source) {
+        return triggerHook(hookName, source, null);
+    }
+    
+    /**
+     * Trigger a hook with existing event
+     */
+    public HookEvent triggerHook(HookEvent event) {
+        String hookName = event.getName();
+        List<HookListener> listeners = hooks.get(hookName);
+        
+        if (listeners == null || listeners.isEmpty()) {
+            if (debugMode) {
+                LogUtils.logDebug("No listeners for hook: " + hookName);
+            }
+            return event;
+        }
+        
+        // Increment call count
+        hookCallCounts.put(hookName, hookCallCounts.getOrDefault(hookName, 0) + 1);
+        
+        if (debugMode) {
+            LogUtils.logDebug("Triggering hook: " + hookName + " (" + listeners.size() + " listeners)");
+        }
+        
+        // Call all listeners in priority order
+        for (HookListener listener : listeners) {
+            try {
+                listener.onEvent(event);
+                
+                // Stop processing if event was cancelled
+                if (event.isCancelled()) {
+                    if (debugMode) {
+                        LogUtils.logDebug("Hook cancelled by listener: " + hookName);
+                    }
+                    break;
+                }
+            } catch (Exception e) {
+                LogUtils.logError("Hook listener error for " + hookName + ": " + e.getMessage());
+            }
+        }
+        
+        return event;
+    }
+    
+    /**
+     * Check if a hook has any listeners
+     */
+    public boolean hasListeners(String hookName) {
+        List<HookListener> listeners = hooks.get(hookName);
+        return listeners != null && !listeners.isEmpty();
+    }
+    
+    /**
+     * Get number of listeners for a hook
+     */
+    public int getListenerCount(String hookName) {
+        List<HookListener> listeners = hooks.get(hookName);
+        return listeners != null ? listeners.size() : 0;
+    }
+    
+    /**
+     * Get all registered hook names
+     */
+    public Set<String> getRegisteredHooks() {
+        return new HashSet<>(hooks.keySet());
+    }
+    
+    /**
+     * Get hook call statistics
+     */
+    public Map<String, Integer> getHookStats() {
+        return new HashMap<>(hookCallCounts);
+    }
+    
+    /**
+     * Enable/disable debug mode
+     */
+    public void setDebugMode(boolean debug) {
+        this.debugMode = debug;
+        LogUtils.logDebug("PluginHook debug mode: " + debug);
+    }
+    
+    /**
+     * Clear all hooks (useful for plugin unloading)
+     */
+    public void clearAllHooks() {
+        hooks.clear();
+        hookCallCounts.clear();
+        LogUtils.logDebug("Cleared all plugin hooks");
+    }
+    
+    /**
+     * Clear hooks for a specific plugin (by listener class)
+     */
+    public void clearHooksForPlugin(Class<?> pluginClass) {
+        int removed = 0;
+        for (Map.Entry<String, List<HookListener>> entry : hooks.entrySet()) {
+            List<HookListener> listeners = entry.getValue();
+            listeners.removeIf(listener -> listener.getClass().equals(pluginClass));
+            if (listeners.isEmpty()) {
+                hooks.remove(entry.getKey());
+            } else {
+                removed += listeners.size();
+            }
+        }
+        LogUtils.logDebug("Removed " + removed + " hooks for plugin: " + pluginClass.getSimpleName());
+    }
+    
+    /**
+     * Utility method to create hook event with single data item
+     */
+    public static HookEvent createEvent(String hookName, Object source, String key, Object value) {
+        HookEvent event = new HookEvent(hookName, source);
+        event.putData(key, value);
+        return event;
+    }
+    
+    /**
+     * Quick hook trigger for simple events
+     */
+    public static void trigger(String hookName, Object source) {
+        getInstance().triggerHook(hookName, source);
+    }
+    
+    /**
+     * Quick hook trigger with one data item
+     */
+    public static void trigger(String hookName, Object source, String key, Object value) {
+        getInstance().triggerHook(createEvent(hookName, source, key, value));
+    }
+    
+    /**
+     * Get hook system status
+     */
+    public String getHookSystemStatus() {
+        StringBuilder status = new StringBuilder();
+        status.append("=== Plugin Hook System Status ===\n");
+        status.append("Total Hooks: ").append(hooks.size()).append("\n");
+        status.append("Debug Mode: ").append(debugMode).append("\n");
+        status.append("Total Calls: ").append(hookCallCounts.values().stream()
+            .mapToInt(Integer::intValue).sum()).append("\n\n");
+        
+        status.append("Active Hooks:\n");
+        for (Map.Entry<String, List<HookListener>> entry : hooks.entrySet()) {
+            status.append("• ").append(entry.getKey())
+                  .append(" (").append(entry.getValue().size()).append(" listeners, ")
+                  .append(hookCallCounts.getOrDefault(entry.getKey(), 0)).append(" calls)\n");
+        }
+        
+        return status.toString();
+    }
+}
+
+--------------------------------------------------------------------------------
+/ModLoader/app/src/main/java/com/modloader/plugin/PluginLoader.java
 
 // File: PluginLoader.java - Part 1 (Core Loading)
 // Path: /app/src/main/java/com/modloader/plugin/PluginLoader.java
@@ -1177,9 +2850,8 @@ public class PluginLoader {
     }
 }
 
-================================================================================
-
-/storage/emulated/0/AndroidIDEProjects/TerrariaML/main/java/com/modloader/plugin/PluginManager.java
+--------------------------------------------------------------------------------
+/ModLoader/app/src/main/java/com/modloader/plugin/PluginManager.java
 
 // File: PluginManager.java - Part 1 (Core Management)
 // Path: /app/src/main/java/com/modloader/plugin/PluginManager.java
@@ -2471,9 +4143,8 @@ public class PluginManager {
     }
 }
 
-================================================================================
-
-/storage/emulated/0/AndroidIDEProjects/TerrariaML/main/java/com/modloader/plugin/PluginRegistry.java
+--------------------------------------------------------------------------------
+/ModLoader/app/src/main/java/com/modloader/plugin/PluginRegistry.java
 
 // File: PluginRegistry.java - Plugin Registration and Lifecycle
 // Path: /app/src/main/java/com/modloader/plugin/PluginRegistry.java
@@ -3198,9 +4869,993 @@ public class PluginRegistry {
     }
 }
 
-================================================================================
+--------------------------------------------------------------------------------
+/ModLoader/app/src/main/java/com/modloader/plugin/PluginStorage.java
 
-/storage/emulated/0/AndroidIDEProjects/TerrariaML/main/java/com/modloader/ui/BaseActivity.java
+// File: PluginStorage.java - Plugin Data Persistence (150+ lines)
+// Path: /app/src/main/java/com/modloader/plugin/PluginStorage.java
+
+package com.modloader.plugin;
+
+import android.content.Context;
+import com.modloader.util.LogUtils;
+import com.modloader.util.PathManager;
+
+import java.io.*;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+
+/**
+ * Plugin Storage - Manages plugin data persistence
+ * Provides database-like storage for plugin data with JSON serialization
+ */
+public class PluginStorage {
+    private static final String TAG = "PluginStorage";
+    private static final String STORAGE_FILE_EXTENSION = ".json";
+    private static final String BACKUP_EXTENSION = ".backup";
+    
+    private final Context context;
+    private final String pluginId;
+    private final File storageDir;
+    private final File storageFile;
+    private final Object lock = new Object();
+    
+    // In-memory cache for better performance
+    private final Map<String, Object> dataCache = new ConcurrentHashMap<>();
+    private boolean cacheLoaded = false;
+    private long lastSaveTime = 0;
+    
+    public PluginStorage(Context context, String pluginId) {
+        this.context = context;
+        this.pluginId = pluginId;
+        
+        // Create storage directory
+        File baseDir = PathManager.getGameBaseDir(context, "com.and.games505.TerrariaPaid");
+        storageDir = new File(baseDir, "Plugins/" + sanitizePluginId(pluginId) + "/storage");
+        PathManager.ensureDirectoryExists(storageDir);
+        
+        // Main storage file
+        storageFile = new File(storageDir, "data" + STORAGE_FILE_EXTENSION);
+        
+        LogUtils.logDebug("Created plugin storage for: " + pluginId);
+    }
+    
+    /**
+     * Sanitize plugin ID for use in file paths
+     */
+    private String sanitizePluginId(String id) {
+        return id.replaceAll("[^a-zA-Z0-9._-]", "_").toLowerCase();
+    }
+    
+    /**
+     * Store a value with a key
+     */
+    public void put(String key, Object value) {
+        synchronized (lock) {
+            ensureCacheLoaded();
+            
+            if (value == null) {
+                dataCache.remove(key);
+            } else {
+                dataCache.put(key, value);
+            }
+            
+            // Auto-save after modifications
+            scheduleSave();
+        }
+    }
+    
+    /**
+     * Store multiple values at once
+     */
+    public void putAll(Map<String, Object> data) {
+        synchronized (lock) {
+            ensureCacheLoaded();
+            
+            for (Map.Entry<String, Object> entry : data.entrySet()) {
+                if (entry.getValue() == null) {
+                    dataCache.remove(entry.getKey());
+                } else {
+                    dataCache.put(entry.getKey(), entry.getValue());
+                }
+            }
+            
+            scheduleSave();
+        }
+    }
+    
+    /**
+     * Get a value by key
+     */
+    @SuppressWarnings("unchecked")
+    public <T> T get(String key, Class<T> type) {
+        synchronized (lock) {
+            ensureCacheLoaded();
+            Object value = dataCache.get(key);
+            
+            if (value != null && type.isInstance(value)) {
+                return (T) value;
+            }
+            return null;
+        }
+    }
+    
+    /**
+     * Get a value with default fallback
+     */
+    public <T> T get(String key, Class<T> type, T defaultValue) {
+        T value = get(key, type);
+        return value != null ? value : defaultValue;
+    }
+    
+    /**
+     * Get string value
+     */
+    public String getString(String key) {
+        return get(key, String.class);
+    }
+    
+    /**
+     * Get string value with default
+     */
+    public String getString(String key, String defaultValue) {
+        return get(key, String.class, defaultValue);
+    }
+    
+    /**
+     * Get integer value
+     */
+    public int getInt(String key, int defaultValue) {
+        Integer value = get(key, Integer.class);
+        return value != null ? value : defaultValue;
+    }
+    
+    /**
+     * Get boolean value
+     */
+    public boolean getBoolean(String key, boolean defaultValue) {
+        Boolean value = get(key, Boolean.class);
+        return value != null ? value : defaultValue;
+    }
+    
+    /**
+     * Get long value
+     */
+    public long getLong(String key, long defaultValue) {
+        Long value = get(key, Long.class);
+        return value != null ? value : defaultValue;
+    }
+    
+    /**
+     * Get double value
+     */
+    public double getDouble(String key, double defaultValue) {
+        Double value = get(key, Double.class);
+        return value != null ? value : defaultValue;
+    }
+    
+    /**
+     * Check if key exists
+     */
+    public boolean contains(String key) {
+        synchronized (lock) {
+            ensureCacheLoaded();
+            return dataCache.containsKey(key);
+        }
+    }
+    
+    /**
+     * Remove a key
+     */
+    public void remove(String key) {
+        synchronized (lock) {
+            ensureCacheLoaded();
+            dataCache.remove(key);
+            scheduleSave();
+        }
+    }
+    
+    /**
+     * Clear all data
+     */
+    public void clear() {
+        synchronized (lock) {
+            dataCache.clear();
+            scheduleSave();
+        }
+    }
+    
+    /**
+     * Get all keys
+     */
+    public Set<String> getKeys() {
+        synchronized (lock) {
+            ensureCacheLoaded();
+            return new HashSet<>(dataCache.keySet());
+        }
+    }
+    
+    /**
+     * Get all data as a map
+     */
+    public Map<String, Object> getAllData() {
+        synchronized (lock) {
+            ensureCacheLoaded();
+            return new HashMap<>(dataCache);
+        }
+    }
+    
+    /**
+     * Get data size
+     */
+    public int size() {
+        synchronized (lock) {
+            ensureCacheLoaded();
+            return dataCache.size();
+        }
+    }
+    
+    /**
+     * Check if storage is empty
+     */
+    public boolean isEmpty() {
+        synchronized (lock) {
+            ensureCacheLoaded();
+            return dataCache.isEmpty();
+        }
+    }
+    
+    /**
+     * Force save to disk
+     */
+    public boolean save() {
+        synchronized (lock) {
+            return saveToFile();
+        }
+    }
+    
+    /**
+     * Force reload from disk
+     */
+    public boolean reload() {
+        synchronized (lock) {
+            cacheLoaded = false;
+            dataCache.clear();
+            return loadFromFile();
+        }
+    }
+    
+    /**
+     * Create a backup of current data
+     */
+    public boolean backup() {
+        synchronized (lock) {
+            try {
+                if (!storageFile.exists()) {
+                    return true; // Nothing to backup
+                }
+                
+                File backupFile = new File(storageDir, "data_" + System.currentTimeMillis() + BACKUP_EXTENSION);
+                return copyFile(storageFile, backupFile);
+                
+            } catch (Exception e) {
+                LogUtils.logError("Failed to create backup for plugin " + pluginId + ": " + e.getMessage());
+                return false;
+            }
+        }
+    }
+    
+    /**
+     * Restore from a backup file
+     */
+    public boolean restoreFromBackup(File backupFile) {
+        synchronized (lock) {
+            try {
+                if (!backupFile.exists()) {
+                    return false;
+                }
+                
+                if (copyFile(backupFile, storageFile)) {
+                    return reload();
+                }
+                return false;
+                
+            } catch (Exception e) {
+                LogUtils.logError("Failed to restore backup for plugin " + pluginId + ": " + e.getMessage());
+                return false;
+            }
+        }
+    }
+    
+    /**
+     * Get available backup files
+     */
+    public List<File> getBackupFiles() {
+        File[] files = storageDir.listFiles((dir, name) -> name.endsWith(BACKUP_EXTENSION));
+        if (files == null) {
+            return new ArrayList<>();
+        }
+        
+        List<File> backups = Arrays.asList(files);
+        backups.sort((a, b) -> Long.compare(b.lastModified(), a.lastModified())); // Newest first
+        return backups;
+    }
+    
+    /**
+     * Clean up old backup files (keep only the newest N backups)
+     */
+    public void cleanupOldBackups(int keepCount) {
+        List<File> backups = getBackupFiles();
+        if (backups.size() <= keepCount) {
+            return;
+        }
+        
+        for (int i = keepCount; i < backups.size(); i++) {
+            File backup = backups.get(i);
+            if (backup.delete()) {
+                LogUtils.logDebug("Deleted old backup: " + backup.getName());
+            }
+        }
+    }
+    
+    /**
+     * Ensure cache is loaded from file
+     */
+    private void ensureCacheLoaded() {
+        if (!cacheLoaded) {
+            loadFromFile();
+            cacheLoaded = true;
+        }
+    }
+    
+    /**
+     * Schedule a save operation (debounced)
+     */
+    private void scheduleSave() {
+        // Simple debouncing - only save if it's been more than 1 second since last save
+        long currentTime = System.currentTimeMillis();
+        if (currentTime - lastSaveTime > 1000) {
+            saveToFile();
+        }
+    }
+    
+    /**
+     * Load data from file
+     */
+    private boolean loadFromFile() {
+        try {
+            if (!storageFile.exists()) {
+                return true; // No file means empty data, which is valid
+            }
+            
+            StringBuilder content = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(new FileReader(storageFile))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    content.append(line);
+                }
+            }
+            
+            if (content.length() > 0) {
+                Map<String, Object> loadedData = parseJsonData(content.toString());
+                dataCache.clear();
+                dataCache.putAll(loadedData);
+            }
+            
+            LogUtils.logDebug("Loaded " + dataCache.size() + " items for plugin: " + pluginId);
+            return true;
+            
+        } catch (Exception e) {
+            LogUtils.logError("Failed to load data for plugin " + pluginId + ": " + e.getMessage());
+            return false;
+        }
+    }
+    
+    /**
+     * Save data to file
+     */
+    private boolean saveToFile() {
+        try {
+            // Create backup before saving
+            if (storageFile.exists()) {
+                File tempBackup = new File(storageDir, "temp" + BACKUP_EXTENSION);
+                copyFile(storageFile, tempBackup);
+            }
+            
+            String jsonData = generateJsonData(dataCache);
+            
+            try (FileWriter writer = new FileWriter(storageFile)) {
+                writer.write(jsonData);
+            }
+            
+            lastSaveTime = System.currentTimeMillis();
+            LogUtils.logDebug("Saved " + dataCache.size() + " items for plugin: " + pluginId);
+            return true;
+            
+        } catch (Exception e) {
+            LogUtils.logError("Failed to save data for plugin " + pluginId + ": " + e.getMessage());
+            return false;
+        }
+    }
+    
+    /**
+     * Simple JSON data parsing (basic implementation)
+     */
+    private Map<String, Object> parseJsonData(String jsonContent) {
+        Map<String, Object> result = new HashMap<>();
+        
+        try {
+            // This is a simplified JSON parser for basic data types
+            // In a production implementation, you would use a proper JSON library
+            jsonContent = jsonContent.trim();
+            if (jsonContent.startsWith("{") && jsonContent.endsWith("}")) {
+                jsonContent = jsonContent.substring(1, jsonContent.length() - 1);
+                
+                String[] pairs = jsonContent.split(",");
+                for (String pair : pairs) {
+                    String[] keyValue = pair.split(":", 2);
+                    if (keyValue.length == 2) {
+                        String key = keyValue[0].trim().replaceAll("\"", "");
+                        String value = keyValue[1].trim();
+                        
+                        // Parse value type
+                        Object parsedValue = parseJsonValue(value);
+                        result.put(key, parsedValue);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            LogUtils.logDebug("JSON parsing error: " + e.getMessage());
+        }
+        
+        return result;
+    }
+    
+    /**
+     * Parse individual JSON values
+     */
+    private Object parseJsonValue(String value) {
+        value = value.trim();
+        
+        // String
+        if (value.startsWith("\"") && value.endsWith("\"")) {
+            return value.substring(1, value.length() - 1);
+        }
+        
+        // Boolean
+        if ("true".equals(value)) return true;
+        if ("false".equals(value)) return false;
+        
+        // Null
+        if ("null".equals(value)) return null;
+        
+        // Number
+        try {
+            if (value.contains(".")) {
+                return Double.parseDouble(value);
+            } else {
+                return Integer.parseInt(value);
+            }
+        } catch (NumberFormatException e) {
+            // Fall back to string
+            return value;
+        }
+    }
+    
+    /**
+     * Generate JSON data (basic implementation)
+     */
+    private String generateJsonData(Map<String, Object> data) {
+        StringBuilder json = new StringBuilder();
+        json.append("{");
+        
+        boolean first = true;
+        for (Map.Entry<String, Object> entry : data.entrySet()) {
+            if (!first) {
+                json.append(",");
+            }
+            first = false;
+            
+            json.append("\"").append(entry.getKey()).append("\":");
+            json.append(formatJsonValue(entry.getValue()));
+        }
+        
+        json.append("}");
+        return json.toString();
+    }
+    
+    /**
+     * Format individual values for JSON
+     */
+    private String formatJsonValue(Object value) {
+        if (value == null) {
+            return "null";
+        } else if (value instanceof String) {
+            return "\"" + value.toString().replace("\"", "\\\"") + "\"";
+        } else if (value instanceof Boolean) {
+            return value.toString();
+        } else if (value instanceof Number) {
+            return value.toString();
+        } else {
+            // Convert to string as fallback
+            return "\"" + value.toString().replace("\"", "\\\"") + "\"";
+        }
+    }
+    
+    /**
+     * Copy file utility
+     */
+    private boolean copyFile(File source, File target) {
+        try (FileInputStream in = new FileInputStream(source);
+             FileOutputStream out = new FileOutputStream(target)) {
+            
+            byte[] buffer = new byte[8192];
+            int bytesRead;
+            while ((bytesRead = in.read(buffer)) != -1) {
+                out.write(buffer, 0, bytesRead);
+            }
+            return true;
+            
+        } catch (Exception e) {
+            LogUtils.logDebug("File copy error: " + e.getMessage());
+            return false;
+        }
+    }
+    
+    /**
+     * Get storage statistics
+     */
+    public StorageStats getStats() {
+        synchronized (lock) {
+            ensureCacheLoaded();
+            
+            StorageStats stats = new StorageStats();
+            stats.pluginId = pluginId;
+            stats.itemCount = dataCache.size();
+            stats.fileSize = storageFile.exists() ? storageFile.length() : 0;
+            stats.lastModified = storageFile.exists() ? storageFile.lastModified() : 0;
+            stats.backupCount = getBackupFiles().size();
+            
+            return stats;
+        }
+    }
+    
+    /**
+     * Storage statistics container
+     */
+    public static class StorageStats {
+        public String pluginId;
+        public int itemCount;
+        public long fileSize;
+        public long lastModified;
+        public int backupCount;
+        
+        @Override
+        public String toString() {
+            return String.format("StorageStats[%s]: %d items, %d bytes, %d backups", 
+                pluginId, itemCount, fileSize, backupCount);
+        }
+    }
+}
+
+--------------------------------------------------------------------------------
+/ModLoader/app/src/main/java/com/modloader/plugin/examples/ExampleThemePlugin.java
+
+// File: ExampleThemePlugin.java - Sample Theme Plugin (150+ lines)
+// Path: /app/src/main/java/com/modloader/plugin/examples/ExampleThemePlugin.java
+
+package com.modloader.plugin.examples;
+
+import android.graphics.Color;
+import android.view.View;
+import android.widget.Toast;
+
+import com.modloader.plugin.Plugin;
+import com.modloader.plugin.PluginContext;
+import com.modloader.plugin.PluginHook;
+import com.modloader.plugin.PluginAPI;
+
+/**
+ * Example Theme Plugin - Demonstrates UI theming capabilities
+ * Shows how plugins can modify the app's appearance and behavior
+ */
+public class ExampleThemePlugin implements Plugin {
+    private static final String PLUGIN_ID = "example_theme_plugin";
+    private static final String PLUGIN_NAME = "Example Theme Plugin";
+    private static final String VERSION = "1.0.0";
+    private static final String AUTHOR = "TerrariaLoader Team";
+    private static final String DESCRIPTION = "An example plugin that demonstrates theme customization and UI modifications";
+    
+    private PluginContext context;
+    private PluginAPI api;
+    
+    // Theme configuration
+    private String currentTheme = "default";
+    private boolean darkModeEnabled = false;
+    private int primaryColor = Color.parseColor("#4CAF50");
+    private int accentColor = Color.parseColor("#FF9800");
+    
+    // Hook listeners
+    private PluginHook.HookListener uiCreateListener;
+    private PluginHook.HookListener themeChangeListener;
+    private PluginHook.HookListener settingsChangeListener;
+    
+    @Override
+    public String getId() {
+        return PLUGIN_ID;
+    }
+    
+    @Override
+    public String getName() {
+        return PLUGIN_NAME;
+    }
+    
+    @Override
+    public String getVersion() {
+        return VERSION;
+    }
+    
+    @Override
+    public String getAuthor() {
+        return AUTHOR;
+    }
+    
+    @Override
+    public String getDescription() {
+        return DESCRIPTION;
+    }
+    
+    @Override
+    public void onLoad(PluginContext context) {
+        this.context = context;
+        this.api = context.getAPI();
+        
+        api.log("Theme plugin loading...");
+        
+        // Load theme configuration
+        loadThemeConfiguration();
+        
+        // Initialize theme system
+        initializeThemeSystem();
+        
+        // Setup hook listeners
+        setupHookListeners();
+        
+        api.log("Theme plugin loaded successfully");
+    }
+    
+    @Override
+    public void onEnable(PluginContext context) {
+        api.log("Theme plugin enabled");
+        
+        // Register hook listeners
+        registerHookListeners();
+        
+        // Apply current theme
+        applyCurrentTheme();
+        
+        // Show welcome message
+        api.showToast("🎨 Theme Plugin: " + currentTheme + " theme activated!");
+        
+        // Schedule theme updates
+        scheduleThemeUpdates();
+    }
+    
+    @Override
+    public void onDisable(PluginContext context) {
+        api.log("Theme plugin disabled");
+        
+        // Restore default theme
+        restoreDefaultTheme();
+        
+        // Show farewell message
+        api.showToast("🎨 Theme Plugin: Restored default theme");
+    }
+    
+    @Override
+    public void onUnload(PluginContext context) {
+        api.log("Theme plugin unloading...");
+        
+        // Clean up resources
+        cleanup();
+        
+        api.log("Theme plugin unloaded");
+    }
+    
+    /**
+     * Load theme configuration from preferences
+     */
+    private void loadThemeConfiguration() {
+        currentTheme = api.getSetting("theme_name", "default");
+        darkModeEnabled = api.getSetting("dark_mode", false);
+        
+        // Load colors
+        String primaryColorHex = api.getSetting("primary_color", "#4CAF50");
+        String accentColorHex = api.getSetting("accent_color", "#FF9800");
+        
+        try {
+            primaryColor = Color.parseColor(primaryColorHex);
+            accentColor = Color.parseColor(accentColorHex);
+        } catch (IllegalArgumentException e) {
+            api.logWarning("Invalid color format, using defaults");
+            primaryColor = Color.parseColor("#4CAF50");
+            accentColor = Color.parseColor("#FF9800");
+        }
+        
+        api.logDebug("Loaded theme configuration: " + currentTheme + 
+                    " (Dark: " + darkModeEnabled + ")");
+    }
+    
+    /**
+     * Initialize the theme system
+     */
+    private void initializeThemeSystem() {
+        // Create theme data directory
+        context.setData("theme_applied", false);
+        context.setData("original_colors", null);
+        context.setData("theme_start_time", System.currentTimeMillis());
+        
+        // Store theme configurations
+        context.setResource("available_themes", new String[]{
+            "default", "dark", "nature", "ocean", "sunset", "neon"
+        });
+        
+        context.setResource("theme_colors", createThemeColorMap());
+    }
+    
+    /**
+     * Create theme color mapping
+     */
+    private java.util.Map<String, ThemeColors> createThemeColorMap() {
+        java.util.Map<String, ThemeColors> themeMap = new java.util.HashMap<>();
+        
+        themeMap.put("default", new ThemeColors(
+            Color.parseColor("#4CAF50"), // primary
+            Color.parseColor("#FF9800"), // accent
+            Color.parseColor("#FFFFFF"), // background
+            Color.parseColor("#333333")  // text
+        ));
+        
+        themeMap.put("dark", new ThemeColors(
+            Color.parseColor("#BB86FC"), // primary
+            Color.parseColor("#03DAC6"), // accent
+            Color.parseColor("#121212"), // background
+            Color.parseColor("#FFFFFF")  // text
+        ));
+        
+        themeMap.put("nature", new ThemeColors(
+            Color.parseColor("#4CAF50"), // primary
+            Color.parseColor("#8BC34A"), // accent
+            Color.parseColor("#F1F8E9"), // background
+            Color.parseColor("#2E7D32")  // text
+        ));
+        
+        themeMap.put("ocean", new ThemeColors(
+            Color.parseColor("#2196F3"), // primary
+            Color.parseColor("#00BCD4"), // accent
+            Color.parseColor("#E3F2FD"), // background
+            Color.parseColor("#0D47A1")  // text
+        ));
+        
+        themeMap.put("sunset", new ThemeColors(
+            Color.parseColor("#FF5722"), // primary
+            Color.parseColor("#FF9800"), // accent
+            Color.parseColor("#FFF3E0"), // background
+            Color.parseColor("#BF360C")  // text
+        ));
+        
+        themeMap.put("neon", new ThemeColors(
+            Color.parseColor("#E91E63"), // primary
+            Color.parseColor("#9C27B0"), // accent
+            Color.parseColor("#000000"), // background
+            Color.parseColor("#00FF00")  // text
+        ));
+        
+        return themeMap;
+    }
+    
+    /**
+     * Setup hook listeners
+     */
+    private void setupHookListeners() {
+        // UI Creation Hook - Apply theme when UI elements are created
+        uiCreateListener = new PluginHook.HookListener() {
+            @Override
+            public void onEvent(PluginHook.HookEvent event) {
+                View view = event.getData("view", View.class);
+                if (view != null) {
+                    applyThemeToView(view);
+                }
+            }
+            
+            @Override
+            public PluginHook.Priority getPriority() {
+                return PluginHook.Priority.HIGH;
+            }
+        };
+        
+        // Theme Change Hook - Respond to theme changes
+        themeChangeListener = new PluginHook.HookListener() {
+            @Override
+            public void onEvent(PluginHook.HookEvent event) {
+                String newTheme = event.getData("theme", String.class);
+                if (newTheme != null && !newTheme.equals(currentTheme)) {
+                    switchTheme(newTheme);
+                }
+            }
+        };
+        
+        // Settings Change Hook - Update theme when settings change
+        settingsChangeListener = new PluginHook.HookListener() {
+            @Override
+            public void onEvent(PluginHook.HookEvent event) {
+                String settingKey = event.getData("key", String.class);
+                if (settingKey != null && settingKey.startsWith("theme_")) {
+                    loadThemeConfiguration();
+                    applyCurrentTheme();
+                }
+            }
+        };
+    }
+    
+    /**
+     * Register hook listeners
+     */
+    private void registerHookListeners() {
+        api.registerHook(PluginHook.Hooks.UI_MENU_CREATE, uiCreateListener);
+        api.registerHook(PluginHook.Hooks.UI_THEME_CHANGE, themeChangeListener);
+        api.registerHook(PluginHook.Hooks.SETTINGS_CHANGE, settingsChangeListener);
+    }
+    
+    /**
+     * Apply current theme
+     */
+    private void applyCurrentTheme() {
+        @SuppressWarnings("unchecked")
+        java.util.Map<String, ThemeColors> themeColors = context.getResource("theme_colors", java.util.Map.class);
+        
+        if (themeColors != null && themeColors.containsKey(currentTheme)) {
+            ThemeColors colors = themeColors.get(currentTheme);
+            primaryColor = colors.primary;
+            accentColor = colors.accent;
+            
+            // Store current colors
+            context.setData("current_primary", primaryColor);
+            context.setData("current_accent", accentColor);
+            context.setData("theme_applied", true);
+            
+            api.logDebug("Applied theme: " + currentTheme);
+            
+            // Trigger theme change event for other components
+            api.triggerHook(PluginHook.Hooks.UI_THEME_CHANGE, this, "theme", currentTheme);
+        }
+    }
+    
+    /**
+     * Apply theme to a specific view
+     */
+    private void applyThemeToView(View view) {
+        if (!context.getData("theme_applied", Boolean.class, false)) {
+            return;
+        }
+        
+        try {
+            // This is a simplified example - in a real implementation,
+            // you would apply theme colors to specific view types
+            view.setBackgroundColor(primaryColor);
+            
+            // Log the theming action
+            api.logDebug("Applied theme to view: " + view.getClass().getSimpleName());
+            
+        } catch (Exception e) {
+            api.logWarning("Failed to apply theme to view: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Switch to a different theme
+     */
+    private void switchTheme(String themeName) {
+        String oldTheme = currentTheme;
+        currentTheme = themeName;
+        
+        // Save new theme setting
+        api.setSetting("theme_name", currentTheme);
+        
+        // Apply the new theme
+        applyCurrentTheme();
+        
+        api.log("Switched theme from " + oldTheme + " to " + currentTheme);
+        api.showToast("🎨 Theme changed to: " + currentTheme);
+    }
+    
+    /**
+     * Restore default theme
+     */
+    private void restoreDefaultTheme() {
+        currentTheme = "default";
+        darkModeEnabled = false;
+        applyCurrentTheme();
+        
+        api.logDebug("Restored default theme");
+    }
+    
+    /**
+     * Schedule periodic theme updates
+     */
+    private void scheduleThemeUpdates() {
+        // Example: Auto-switch themes based on time of day
+        api.executeAsync(() -> {
+            while (context.isEnabled()) {
+                try {
+                    Thread.sleep(300000); // Check every 5 minutes
+                    
+                    if (api.getSetting("auto_theme_switch", false)) {
+                        updateThemeBasedOnTime();
+                    }
+                    
+                } catch (InterruptedException e) {
+                    break;
+                }
+            }
+        });
+    }
+    
+    /**
+     * Update theme based on current time
+     */
+    private void updateThemeBasedOnTime() {
+        java.util.Calendar calendar = java.util.Calendar.getInstance();
+        int hour = calendar.get(java.util.Calendar.HOUR_OF_DAY);
+        
+        String newTheme;
+        if (hour >= 6 && hour < 12) {
+            newTheme = "nature"; // Morning
+        } else if (hour >= 12 && hour < 17) {
+            newTheme = "ocean"; // Afternoon
+        } else if (hour >= 17 && hour < 20) {
+            newTheme = "sunset"; // Evening
+        } else {
+            newTheme = "dark"; // Night
+        }
+        
+        if (!newTheme.equals(currentTheme)) {
+            switchTheme(newTheme);
+            api.log("Auto-switched to " + newTheme + " theme based on time");
+        }
+    }
+    
+    /**
+     * Clean up resources
+     */
+    private void cleanup() {
+        // Cancel any scheduled tasks
+        context.setData("theme_applied", false);
+        
+        // Clear theme data
+        context.removeData("current_primary");
+        context.removeData("current_accent");
+        context.removeData("theme_start_time");
+    }
+    
+    // Helper class for theme colors
+    private static class ThemeColors {
+        final int primary;
+        final int accent;
+        final int background;
+        final int text;
+        
+        public ThemeColors(int primary, int accent, int background, int text) {
+            this.primary = primary;
+            this.accent = accent;
+            this.background = background;
+            this.text = text;
+        }
+    }
+}
+
+--------------------------------------------------------------------------------
+/ModLoader/app/src/main/java/com/modloader/ui/BaseActivity.java
 
 // File: BaseActivity.java (FIXED) - Compatible with PermissionManager
 // Path: /app/src/main/java/com/modloader/ui/BaseActivity.java
@@ -3650,9 +6305,8 @@ public abstract class BaseActivity extends AppCompatActivity implements Permissi
     }
 }
 
-================================================================================
-
-/storage/emulated/0/AndroidIDEProjects/TerrariaML/main/java/com/modloader/ui/DllModActivity.java
+--------------------------------------------------------------------------------
+/ModLoader/app/src/main/java/com/modloader/ui/DllModActivity.java
 
 // File: DllModActivity.java (Updated Activity) - Uses Controller Pattern
 // Path: /storage/emulated/0/AndroidIDEProjects/main/java/com/terrarialoader/ui/DllModActivity.java
@@ -3954,9 +6608,8 @@ public class DllModActivity extends Activity implements DllModController.DllModC
     }
 }
 
-================================================================================
-
-/storage/emulated/0/AndroidIDEProjects/TerrariaML/main/java/com/modloader/ui/DllModController.java
+--------------------------------------------------------------------------------
+/ModLoader/app/src/main/java/com/modloader/ui/DllModController.java
 
 // File: DllModController.java (Fixed) - Corrected method calls with Context parameter
 // Path: /storage/emulated/0/AndroidIDEProjects/TerrariaML/app/src/main/java/com/terrarialoader/ui/DllModController.java
@@ -4318,9 +6971,8 @@ public class DllModController {
     }
 }
 
-================================================================================
-
-/storage/emulated/0/AndroidIDEProjects/TerrariaML/main/java/com/modloader/ui/InstructionsActivity.java
+--------------------------------------------------------------------------------
+/ModLoader/app/src/main/java/com/modloader/ui/InstructionsActivity.java
 
 // File: InstructionsActivity.java (Fixed) - Corrected method calls with Context parameter
 // Path: /storage/emulated/0/AndroidIDEProjects/TerrariaML/app/src/main/java/com/terrarialoader/ui/InstructionsActivity.java
@@ -4622,9 +7274,8 @@ public class InstructionsActivity extends AppCompatActivity {
     }
 }
 
-================================================================================
-
-/storage/emulated/0/AndroidIDEProjects/TerrariaML/main/java/com/modloader/ui/LogCategoryAdapter.java
+--------------------------------------------------------------------------------
+/ModLoader/app/src/main/java/com/modloader/ui/LogCategoryAdapter.java
 
 // File: LogCategoryAdapter.java - Advanced Log Display Adapter
 // Path: /main/java/com/terrarialoader/ui/LogCategoryAdapter.java
@@ -5030,9 +7681,8 @@ public class LogCategoryAdapter extends RecyclerView.Adapter<LogCategoryAdapter.
     }
 }
 
-================================================================================
-
-/storage/emulated/0/AndroidIDEProjects/TerrariaML/main/java/com/modloader/ui/LogEntry.java
+--------------------------------------------------------------------------------
+/ModLoader/app/src/main/java/com/modloader/ui/LogEntry.java
 
 // File: LogEntry.java - Enhanced Log Entry Model for Advanced Logging
 // Path: /main/java/com/terrarialoader/ui/LogEntry.java
@@ -5311,346 +7961,576 @@ public class LogEntry {
     }
 }
 
-================================================================================
+--------------------------------------------------------------------------------
+/ModLoader/app/src/main/java/com/modloader/ui/LogViewerActivity.java
 
-/storage/emulated/0/AndroidIDEProjects/TerrariaML/main/java/com/modloader/ui/LogViewerActivity.java
-
-// File: LogViewerActivity.java (ENHANCED) - Advanced Log Viewer with Better UI
-// Path: /main/java/com/terrarialoader/ui/LogViewerActivity.java
+// File: LogViewerActivity.java (FIXED) - Complete Enhanced Log Viewer with Persistent Settings
+// Path: /app/src/main/java/com/modloader/ui/LogViewerActivity.java
 
 package com.modloader.ui;
 
+import android.app.AlertDialog;
+import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.text.SpannableString;
-import android.text.Spanned;
-import android.text.style.ForegroundColorSpan;
-import android.text.style.StyleSpan;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
 import android.widget.*;
-import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.FileProvider;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
 import com.modloader.R;
 import com.modloader.util.LogUtils;
-import com.modloader.util.PathManager;
 
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.regex.Pattern;
 
 public class LogViewerActivity extends AppCompatActivity {
+    private static final String TAG = "LogViewerActivity";
+    
+    // FIXED: SharedPreferences for persistent settings
+    private static final String PREFS_NAME = "log_viewer_settings";
+    private static final String PREF_AUTO_REFRESH = "auto_refresh_enabled";
+    private static final String PREF_SYNTAX_HIGHLIGHTING = "syntax_highlighting_enabled";
+    private static final String PREF_TEXT_SIZE = "text_size";
+    private static final String PREF_AUTO_SCROLL = "auto_scroll_enabled";
+    private static final String PREF_LOG_TYPE_FILTER = "log_type_filter";
+    private static final String PREF_LOG_LEVEL_FILTER = "log_level_filter";
     
     // UI Components
     private SwipeRefreshLayout swipeRefreshLayout;
     private ScrollView logScrollView;
     private TextView logTextView;
+    private TextView logStatsText;
+    private Button refreshButton;
+    
+    // Filter Components
     private LinearLayout filterSection;
     private Spinner logTypeSpinner;
     private Spinner logLevelSpinner;
     private EditText searchEditText;
+    private CheckBox autoScrollCheckbox;
     private Button clearLogsButton;
     private Button exportLogsButton;
-    private Button refreshButton;
-    private CheckBox autoScrollCheckbox;
-    private TextView logStatsText;
     
-    // Data
-    private List<String> allLogs = new ArrayList<>();
-    private List<String> filteredLogs = new ArrayList<>();
-    private String currentFilter = "ALL";
-    private String currentLevel = "ALL";
-    private String searchQuery = "";
-    private boolean autoScroll = true;
-    private Handler refreshHandler;
-    private Runnable refreshRunnable;
+    // Settings Components (for settings modal)
+    private SharedPreferences settings;
+    private boolean autoRefreshEnabled = true;
+    private boolean syntaxHighlightingEnabled = true;
+    private int textSize = 12;
+    private boolean autoScrollEnabled = true;
     
-    // Log types and levels
-    private final String[] LOG_TYPES = {"ALL", "USER", "DEBUG", "ERROR", "SYSTEM", "MOD"};
-    private final String[] LOG_LEVELS = {"ALL", "INFO", "WARN", "ERROR", "FATAL"};
+    // Data Management
+    private List<LogEntry> allLogEntries = new ArrayList<>();
+    private List<LogEntry> filteredLogEntries = new ArrayList<>();
+    private String currentSearchQuery = "";
+    private String currentTypeFilter = "ALL";
+    private String currentLevelFilter = "ALL";
+    
+    // Auto-refresh
+    private Handler autoRefreshHandler;
+    private Runnable autoRefreshRunnable;
+    private static final int AUTO_REFRESH_INTERVAL = 5000; // 5 seconds
+    
+    // Threading
+    private ExecutorService executorService = Executors.newSingleThreadExecutor();
+    
+    // Log Entry Model
+    private static class LogEntry {
+        public String timestamp;
+        public String level;
+        public String tag;
+        public String message;
+        public String type;
+        public String fullText;
+        
+        public LogEntry(String fullText) {
+            this.fullText = fullText;
+            parseLogEntry(fullText);
+        }
+        
+        private void parseLogEntry(String logText) {
+            // Parse log entry format: [2025-08-31 13:42:28] LEVEL: Message
+            try {
+                if (logText.startsWith("[")) {
+                    int timestampEnd = logText.indexOf("]");
+                    if (timestampEnd > 0) {
+                        timestamp = logText.substring(1, timestampEnd);
+                        String remaining = logText.substring(timestampEnd + 1).trim();
+                        
+                        if (remaining.contains(":")) {
+                            String[] parts = remaining.split(":", 2);
+                            level = parts[0].trim();
+                            message = parts.length > 1 ? parts[1].trim() : "";
+                        } else {
+                            level = "INFO";
+                            message = remaining;
+                        }
+                    } else {
+                        // Fallback parsing
+                        timestamp = "Unknown";
+                        level = "INFO";
+                        message = logText;
+                    }
+                } else {
+                    // Simple format without timestamp
+                    timestamp = "Unknown";
+                    level = "INFO";
+                    message = logText;
+                }
+                
+                // Determine type based on content
+                if (message.contains("USER:") || level.equals("USER")) {
+                    type = "USER";
+                } else if (message.contains("ERROR") || level.equals("ERROR")) {
+                    type = "ERROR";
+                } else if (message.contains("WARNING") || level.equals("WARNING")) {
+                    type = "WARNING";
+                } else if (message.contains("DEBUG") || level.equals("DEBUG")) {
+                    type = "DEBUG";
+                } else {
+                    type = "INFO";
+                }
+                
+                // Extract tag if present
+                if (message.startsWith("[") && message.contains("]")) {
+                    int tagEnd = message.indexOf("]");
+                    tag = message.substring(1, tagEnd);
+                } else {
+                    tag = "System";
+                }
+            } catch (Exception e) {
+                // Fallback for malformed log entries
+                timestamp = "Unknown";
+                level = "INFO";
+                tag = "System";
+                message = logText;
+                type = "INFO";
+            }
+        }
+    }
     
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_log_viewer_enhanced);
-        
         setTitle("📋 Advanced Log Viewer");
-        getSupportActionBar().setDisplayHomeAsUpEnabled(true);
         
-        initializeComponents();
-        setupUI();
+        // FIXED: Initialize SharedPreferences
+        settings = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        loadSettings();
+        
+        initializeViews();
         setupFilters();
-        loadLogs();
-        startAutoRefresh();
+        setupListeners();
+        setupAutoRefresh();
+        
+        // Initial log load
+        refreshLogs();
         
         LogUtils.logUser("Advanced Log Viewer opened");
     }
     
-    private void initializeComponents() {
-        // Find UI components
+    // FIXED: Load settings from SharedPreferences
+    private void loadSettings() {
+        autoRefreshEnabled = settings.getBoolean(PREF_AUTO_REFRESH, true);
+        syntaxHighlightingEnabled = settings.getBoolean(PREF_SYNTAX_HIGHLIGHTING, true);
+        textSize = settings.getInt(PREF_TEXT_SIZE, 12);
+        autoScrollEnabled = settings.getBoolean(PREF_AUTO_SCROLL, true);
+        currentTypeFilter = settings.getString(PREF_LOG_TYPE_FILTER, "ALL");
+        currentLevelFilter = settings.getString(PREF_LOG_LEVEL_FILTER, "ALL");
+        
+        LogUtils.logDebug("Settings loaded - AutoRefresh: " + autoRefreshEnabled + 
+            ", SyntaxHighlighting: " + syntaxHighlightingEnabled + 
+            ", TextSize: " + textSize);
+    }
+    
+    // FIXED: Save settings to SharedPreferences
+    private void saveSettings() {
+        SharedPreferences.Editor editor = settings.edit();
+        editor.putBoolean(PREF_AUTO_REFRESH, autoRefreshEnabled);
+        editor.putBoolean(PREF_SYNTAX_HIGHLIGHTING, syntaxHighlightingEnabled);
+        editor.putInt(PREF_TEXT_SIZE, textSize);
+        editor.putBoolean(PREF_AUTO_SCROLL, autoScrollEnabled);
+        editor.putString(PREF_LOG_TYPE_FILTER, currentTypeFilter);
+        editor.putString(PREF_LOG_LEVEL_FILTER, currentLevelFilter);
+        editor.apply(); // FIXED: Use apply() for asynchronous save
+        
+        LogUtils.logDebug("Settings saved successfully");
+    }
+    
+    private void initializeViews() {
+        // Main components
         swipeRefreshLayout = findViewById(R.id.swipeRefreshLayout);
         logScrollView = findViewById(R.id.logScrollView);
         logTextView = findViewById(R.id.logTextView);
+        logStatsText = findViewById(R.id.logStatsText);
+        refreshButton = findViewById(R.id.refreshButton);
+        
+        // Filter components
         filterSection = findViewById(R.id.filterSection);
         logTypeSpinner = findViewById(R.id.logTypeSpinner);
         logLevelSpinner = findViewById(R.id.logLevelSpinner);
         searchEditText = findViewById(R.id.searchEditText);
+        autoScrollCheckbox = findViewById(R.id.autoScrollCheckbox);
         clearLogsButton = findViewById(R.id.clearLogsButton);
         exportLogsButton = findViewById(R.id.exportLogsButton);
-        refreshButton = findViewById(R.id.refreshButton);
-        autoScrollCheckbox = findViewById(R.id.autoScrollCheckbox);
-        logStatsText = findViewById(R.id.logStatsText);
         
-        // Initialize handlers
-        refreshHandler = new Handler(Looper.getMainLooper());
+        // FIXED: Apply loaded settings to UI components
+        applySettingsToUI();
     }
     
-    private void setupUI() {
-        // Setup swipe to refresh
-        swipeRefreshLayout.setOnRefreshListener(() -> {
-            loadLogs();
-            swipeRefreshLayout.setRefreshing(false);
-            Toast.makeText(this, "Logs refreshed", Toast.LENGTH_SHORT).show();
-        });
+    // FIXED: Apply loaded settings to UI components
+    private void applySettingsToUI() {
+        if (logTextView != null) {
+            logTextView.setTextSize(textSize);
+        }
+        if (autoScrollCheckbox != null) {
+            autoScrollCheckbox.setChecked(autoScrollEnabled);
+        }
+    }
+    
+    private void setupFilters() {
+        // Setup type filter spinner
+        String[] typeOptions = {"ALL", "USER", "ERROR", "WARNING", "DEBUG", "INFO"};
+        ArrayAdapter<String> typeAdapter = new ArrayAdapter<>(this, 
+            android.R.layout.simple_spinner_item, typeOptions);
+        typeAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        logTypeSpinner.setAdapter(typeAdapter);
         
-        // Setup log text view
-        logTextView.setTextSize(12);
-        logTextView.setTypeface(Typeface.MONOSPACE);
-        logTextView.setTextIsSelectable(true);
-        logTextView.setBackgroundColor(Color.parseColor("#1E1E1E"));
-        logTextView.setTextColor(Color.parseColor("#E0E0E0"));
-        logTextView.setPadding(16, 16, 16, 16);
+        // FIXED: Set spinner to saved filter value
+        int typePosition = Arrays.asList(typeOptions).indexOf(currentTypeFilter);
+        if (typePosition >= 0) {
+            logTypeSpinner.setSelection(typePosition);
+        }
         
-        // Setup buttons
-        clearLogsButton.setOnClickListener(v -> showClearLogsDialog());
-        exportLogsButton.setOnClickListener(v -> exportLogs());
-        refreshButton.setOnClickListener(v -> {
-            loadLogs();
-            Toast.makeText(this, "Logs refreshed", Toast.LENGTH_SHORT).show();
-        });
+        // Setup level filter spinner
+        String[] levelOptions = {"ALL", "ERROR", "WARNING", "INFO", "DEBUG", "USER"};
+        ArrayAdapter<String> levelAdapter = new ArrayAdapter<>(this, 
+            android.R.layout.simple_spinner_item, levelOptions);
+        levelAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        logLevelSpinner.setAdapter(levelAdapter);
         
-        // Setup auto-scroll checkbox
-        autoScrollCheckbox.setChecked(autoScroll);
-        autoScrollCheckbox.setOnCheckedChangeListener((buttonView, isChecked) -> {
-            autoScroll = isChecked;
-            if (autoScroll) {
-                scrollToBottom();
+        // FIXED: Set spinner to saved filter value
+        int levelPosition = Arrays.asList(levelOptions).indexOf(currentLevelFilter);
+        if (levelPosition >= 0) {
+            logLevelSpinner.setSelection(levelPosition);
+        }
+    }
+    
+    private void setupListeners() {
+        // Swipe to refresh
+        swipeRefreshLayout.setOnRefreshListener(this::refreshLogs);
+        
+        // Manual refresh button
+        refreshButton.setOnClickListener(v -> refreshLogs());
+        
+        // Filter listeners
+        logTypeSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                currentTypeFilter = parent.getItemAtPosition(position).toString();
+                saveSettings(); // FIXED: Save when filter changes
+                applyFilters();
             }
+            
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {}
         });
         
-        // Setup search functionality
-        searchEditText.addTextChangedListener(new android.text.TextWatcher() {
+        logLevelSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                currentLevelFilter = parent.getItemAtPosition(position).toString();
+                saveSettings(); // FIXED: Save when filter changes
+                applyFilters();
+            }
+            
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {}
+        });
+        
+        // Search functionality
+        searchEditText.addTextChangedListener(new TextWatcher() {
             @Override
             public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
             
             @Override
             public void onTextChanged(CharSequence s, int start, int before, int count) {
-                searchQuery = s.toString().trim();
+                currentSearchQuery = s.toString().toLowerCase().trim();
                 applyFilters();
             }
             
             @Override
-            public void afterTextChanged(android.text.Editable s) {}
-        });
-    }
-    
-    private void setupFilters() {
-        // Setup log type spinner
-        ArrayAdapter<String> typeAdapter = new ArrayAdapter<>(this, 
-            android.R.layout.simple_spinner_item, LOG_TYPES);
-        typeAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        logTypeSpinner.setAdapter(typeAdapter);
-        logTypeSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            @Override
-            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                currentFilter = LOG_TYPES[position];
-                applyFilters();
-            }
-            
-            @Override
-            public void onNothingSelected(AdapterView<?> parent) {}
+            public void afterTextChanged(Editable s) {}
         });
         
-        // Setup log level spinner
-        ArrayAdapter<String> levelAdapter = new ArrayAdapter<>(this,
-            android.R.layout.simple_spinner_item, LOG_LEVELS);
-        levelAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        logLevelSpinner.setAdapter(levelAdapter);
-        logLevelSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            @Override
-            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                currentLevel = LOG_LEVELS[position];
-                applyFilters();
+        // Auto-scroll checkbox
+        autoScrollCheckbox.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            autoScrollEnabled = isChecked;
+            saveSettings(); // FIXED: Save when setting changes
+            if (isChecked) {
+                scrollToBottom();
             }
-            
+        });
+        
+        // Action buttons
+        clearLogsButton.setOnClickListener(v -> showClearLogsDialog());
+        exportLogsButton.setOnClickListener(v -> exportLogs());
+    }
+    
+    private void setupAutoRefresh() {
+        autoRefreshHandler = new Handler(Looper.getMainLooper());
+        autoRefreshRunnable = new Runnable() {
             @Override
-            public void onNothingSelected(AdapterView<?> parent) {}
+            public void run() {
+                if (autoRefreshEnabled) {
+                    refreshLogs();
+                    autoRefreshHandler.postDelayed(this, AUTO_REFRESH_INTERVAL);
+                }
+            }
+        };
+        
+        // Start auto-refresh if enabled
+        if (autoRefreshEnabled) {
+            autoRefreshHandler.postDelayed(autoRefreshRunnable, AUTO_REFRESH_INTERVAL);
+        }
+    }
+    
+    private void refreshLogs() {
+        executorService.execute(() -> {
+            try {
+                // Get logs from LogUtils
+                String rawLogs = LogUtils.getLogs();
+                
+                runOnUiThread(() -> {
+                    parseAndDisplayLogs(rawLogs);
+                    swipeRefreshLayout.setRefreshing(false);
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    logTextView.setText("❌ Error loading logs: " + e.getMessage());
+                    swipeRefreshLayout.setRefreshing(false);
+                });
+            }
         });
     }
     
-    private void loadLogs() {
-        try {
-            // Get logs from LogUtils
-            String rawLogs = LogUtils.getLogs();
-            
-            // Parse logs into individual lines
-            allLogs.clear();
-            if (rawLogs != null && !rawLogs.trim().isEmpty()) {
-                String[] logLines = rawLogs.split("\n");
-                Collections.addAll(allLogs, logLines);
+    private void parseAndDisplayLogs(String rawLogs) {
+        // Parse logs into entries
+        allLogEntries.clear();
+        if (rawLogs != null && !rawLogs.trim().isEmpty()) {
+            String[] logLines = rawLogs.split("\n");
+            for (String line : logLines) {
+                if (!line.trim().isEmpty()) {
+                    allLogEntries.add(new LogEntry(line.trim()));
+                }
             }
-            
-            // Apply current filters
-            applyFilters();
-            
-            // Update statistics
-            updateLogStats();
-            
-        } catch (Exception e) {
-            LogUtils.logDebug("Error loading logs: " + e.getMessage());
-            Toast.makeText(this, "Error loading logs: " + e.getMessage(), Toast.LENGTH_SHORT).show();
         }
+        
+        // Apply current filters
+        applyFilters();
     }
     
     private void applyFilters() {
-        filteredLogs.clear();
+        filteredLogEntries.clear();
         
-        for (String logLine : allLogs) {
-            if (matchesFilters(logLine)) {
-                filteredLogs.add(logLine);
+        for (LogEntry entry : allLogEntries) {
+            boolean matchesType = currentTypeFilter.equals("ALL") || 
+                entry.type.equals(currentTypeFilter);
+            boolean matchesLevel = currentLevelFilter.equals("ALL") || 
+                entry.level.equals(currentLevelFilter);
+            boolean matchesSearch = currentSearchQuery.isEmpty() || 
+                entry.fullText.toLowerCase().contains(currentSearchQuery);
+            
+            if (matchesType && matchesLevel && matchesSearch) {
+                filteredLogEntries.add(entry);
             }
         }
         
-        displayLogs();
-        updateLogStats();
+        displayFilteredLogs();
+        updateStatistics();
     }
     
-    private boolean matchesFilters(String logLine) {
-        // Apply type filter
-        if (!"ALL".equals(currentFilter)) {
-            if (!logLine.toLowerCase().contains(currentFilter.toLowerCase())) {
-                return false;
-            }
-        }
-        
-        // Apply level filter
-        if (!"ALL".equals(currentLevel)) {
-            if (!logLine.toUpperCase().contains(currentLevel.toUpperCase())) {
-                return false;
-            }
-        }
-        
-        // Apply search query
-        if (!searchQuery.isEmpty()) {
-            if (!logLine.toLowerCase().contains(searchQuery.toLowerCase())) {
-                return false;
-            }
-        }
-        
-        return true;
-    }
-    
-    private void displayLogs() {
-        if (filteredLogs.isEmpty()) {
-            logTextView.setText("📝 No logs match the current filters.\n\n" +
-                "Try adjusting your filter settings or clearing the search box.");
+    private void displayFilteredLogs() {
+        if (filteredLogEntries.isEmpty()) {
+            logTextView.setText("📋 No logs match the current filters.\n\n" +
+                "Try:\n" +
+                "• Changing filter settings\n" +
+                "• Clearing search query\n" +
+                "• Refreshing logs\n" +
+                "• Using the app to generate logs");
             return;
         }
         
-        SpannableString spannableLog = new SpannableString(String.join("\n", filteredLogs));
+        StringBuilder displayText = new StringBuilder();
         
-        // Apply syntax highlighting
-        applySyntaxHighlighting(spannableLog);
+        for (LogEntry entry : filteredLogEntries) {
+            if (syntaxHighlightingEnabled) {
+                displayText.append(formatLogEntryWithSyntax(entry));
+            } else {
+                displayText.append(entry.fullText);
+            }
+            displayText.append("\n");
+        }
         
-        logTextView.setText(spannableLog);
+        // FIXED: Apply text size from settings
+        logTextView.setText(displayText.toString());
+        logTextView.setTextSize(textSize);
         
-        // Auto-scroll to bottom if enabled
-        if (autoScroll) {
+        // Auto-scroll if enabled
+        if (autoScrollEnabled) {
             scrollToBottom();
         }
     }
     
-    private void applySyntaxHighlighting(SpannableString spannableLog) {
-        String text = spannableLog.toString();
-        
-        // Highlight different log levels with colors
-        highlightPattern(spannableLog, "ERROR", Color.parseColor("#FF6B6B"));
-        highlightPattern(spannableLog, "FATAL", Color.parseColor("#FF3030"));
-        highlightPattern(spannableLog, "WARN", Color.parseColor("#FFB366"));
-        highlightPattern(spannableLog, "INFO", Color.parseColor("#66B2FF"));
-        highlightPattern(spannableLog, "DEBUG", Color.parseColor("#98FB98"));
-        
-        // Highlight timestamps
-        highlightPattern(spannableLog, "\\[\\d{2}:\\d{2}:\\d{2}\\]", Color.parseColor("#CCCCCC"));
-        
-        // Highlight file paths
-        highlightPattern(spannableLog, "/[\\w/.-]+\\.(java|kt|xml)", Color.parseColor("#DDA0DD"));
-        
-        // Highlight search query if present
-        if (!searchQuery.isEmpty()) {
-            highlightPattern(spannableLog, Pattern.quote(searchQuery), Color.parseColor("#FFFF00"));
+    private String formatLogEntryWithSyntax(LogEntry entry) {
+        // This would ideally use SpannableString for actual coloring
+        // For now, we'll add visual indicators
+        String indicator = "";
+        switch (entry.type) {
+            case "ERROR":
+                indicator = "❌ ";
+                break;
+            case "WARNING":
+                indicator = "⚠️ ";
+                break;
+            case "DEBUG":
+                indicator = "🔍 ";
+                break;
+            case "USER":
+                indicator = "👤 ";
+                break;
+            default:
+                indicator = "ℹ️ ";
+                break;
         }
-    }
-    
-    private void highlightPattern(SpannableString spannableLog, String pattern, int color) {
-        Pattern p = Pattern.compile(pattern, Pattern.CASE_INSENSITIVE);
-        java.util.regex.Matcher matcher = p.matcher(spannableLog.toString());
         
-        while (matcher.find()) {
-            spannableLog.setSpan(new ForegroundColorSpan(color), 
-                matcher.start(), matcher.end(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        }
+        return indicator + entry.fullText;
     }
     
-    private void scrollToBottom() {
-        logScrollView.post(() -> logScrollView.fullScroll(ScrollView.FOCUS_DOWN));
-    }
-    
-    private void updateLogStats() {
-        int totalLogs = allLogs.size();
-        int filteredCount = filteredLogs.size();
+    private void updateStatistics() {
+        int totalLogs = allLogEntries.size();
+        int showingLogs = filteredLogEntries.size();
         int errorCount = 0;
         int warningCount = 0;
         
-        for (String log : allLogs) {
-            if (log.toUpperCase().contains("ERROR") || log.toUpperCase().contains("FATAL")) {
-                errorCount++;
-            } else if (log.toUpperCase().contains("WARN")) {
-                warningCount++;
-            }
+        for (LogEntry entry : allLogEntries) {
+            if ("ERROR".equals(entry.type)) errorCount++;
+            else if ("WARNING".equals(entry.type)) warningCount++;
         }
         
-        String statsText = String.format("📊 Total: %d | Showing: %d | Errors: %d | Warnings: %d",
-            totalLogs, filteredCount, errorCount, warningCount);
+        String statsText = String.format(Locale.getDefault(),
+            "📊 Total: %d | Showing: %d | Errors: %d | Warnings: %d",
+            totalLogs, showingLogs, errorCount, warningCount);
+        
         logStatsText.setText(statsText);
     }
     
-    private void startAutoRefresh() {
-        refreshRunnable = new Runnable() {
-            @Override
-            public void run() {
-                loadLogs();
-                refreshHandler.postDelayed(this, 5000); // Refresh every 5 seconds
-            }
-        };
-        refreshHandler.postDelayed(refreshRunnable, 5000);
+    private void scrollToBottom() {
+        logScrollView.post(() -> {
+            logScrollView.fullScroll(View.FOCUS_DOWN);
+        });
     }
     
-    private void stopAutoRefresh() {
-        if (refreshHandler != null && refreshRunnable != null) {
-            refreshHandler.removeCallbacks(refreshRunnable);
-        }
+    // FIXED: Settings dialog with proper persistence
+    private void showSettingsDialog() {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        
+        // Create custom view for settings
+        LinearLayout settingsView = new LinearLayout(this);
+        settingsView.setOrientation(LinearLayout.VERTICAL);
+        settingsView.setPadding(48, 32, 48, 32);
+        
+        // Title
+        TextView title = new TextView(this);
+        title.setText("⚙️ Log Viewer Settings");
+        title.setTextSize(18);
+        title.setTypeface(null, Typeface.BOLD);
+        title.setPadding(0, 0, 0, 24);
+        settingsView.addView(title);
+        
+        // Auto-refresh setting
+        CheckBox autoRefreshCheck = new CheckBox(this);
+        autoRefreshCheck.setText("🔄 Auto-refresh logs (every 5 seconds)");
+        autoRefreshCheck.setChecked(autoRefreshEnabled);
+        settingsView.addView(autoRefreshCheck);
+        
+        // Syntax highlighting setting
+        CheckBox syntaxHighlightCheck = new CheckBox(this);
+        syntaxHighlightCheck.setText("🎨 Enable syntax highlighting");
+        syntaxHighlightCheck.setChecked(syntaxHighlightingEnabled);
+        settingsView.addView(syntaxHighlightCheck);
+        
+        // Text size setting
+        TextView textSizeLabel = new TextView(this);
+        textSizeLabel.setText("📝 Text Size: " + textSize);
+        textSizeLabel.setPadding(0, 24, 0, 8);
+        settingsView.addView(textSizeLabel);
+        
+        SeekBar textSizeSeek = new SeekBar(this);
+        textSizeSeek.setMin(8);
+        textSizeSeek.setMax(24);
+        textSizeSeek.setProgress(textSize);
+        textSizeSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                textSizeLabel.setText("📝 Text Size: " + progress);
+            }
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
+        settingsView.addView(textSizeSeek);
+        
+        // Note about persistence
+        TextView persistNote = new TextView(this);
+        persistNote.setText("💡 Changes are applied immediately and persist during this session.");
+        persistNote.setTextSize(12);
+        persistNote.setPadding(0, 16, 0, 0);
+        persistNote.setTextColor(Color.GRAY);
+        settingsView.addView(persistNote);
+        
+        builder.setView(settingsView);
+        builder.setPositiveButton("✅ Apply", (dialog, which) -> {
+            // FIXED: Apply and save settings
+            autoRefreshEnabled = autoRefreshCheck.isChecked();
+            syntaxHighlightingEnabled = syntaxHighlightCheck.isChecked();
+            textSize = textSizeSeek.getProgress();
+            
+            // Save to SharedPreferences
+            saveSettings();
+            
+            // Apply immediately
+            applySettingsToUI();
+            displayFilteredLogs(); // Refresh display with new settings
+            
+            // Restart auto-refresh if needed
+            setupAutoRefresh();
+            
+            Toast.makeText(this, "✅ Settings applied and saved!", Toast.LENGTH_SHORT).show();
+            LogUtils.logUser("Log viewer settings updated - AutoRefresh: " + autoRefreshEnabled + 
+                ", Syntax: " + syntaxHighlightingEnabled + ", TextSize: " + textSize);
+        });
+        
+        builder.setNegativeButton("Cancel", null);
+        builder.show();
     }
     
     private void showClearLogsDialog() {
@@ -5658,189 +8538,131 @@ public class LogViewerActivity extends AppCompatActivity {
             .setTitle("🗑️ Clear Logs")
             .setMessage("Are you sure you want to clear all logs? This action cannot be undone.")
             .setPositiveButton("Clear", (dialog, which) -> {
-                clearLogs();
+                LogUtils.clearLogs();
+                allLogEntries.clear();
+                filteredLogEntries.clear();
+                logTextView.setText("📋 Logs cleared.\n\nNew logs will appear here as you use the app.");
+                updateStatistics();
+                Toast.makeText(this, "🗑️ Logs cleared", Toast.LENGTH_SHORT).show();
             })
             .setNegativeButton("Cancel", null)
             .show();
     }
     
-    private void clearLogs() {
-        try {
-            // Clear logs in LogUtils
-            LogUtils.clearLogs();
-            
-            // Reload empty logs
-            loadLogs();
-            
-            Toast.makeText(this, "✅ Logs cleared successfully", Toast.LENGTH_SHORT).show();
-            LogUtils.logUser("Logs cleared by user");
-            
-        } catch (Exception e) {
-            Toast.makeText(this, "❌ Failed to clear logs: " + e.getMessage(), Toast.LENGTH_SHORT).show();
-            LogUtils.logDebug("Error clearing logs: " + e.getMessage());
-        }
-    }
-    
     private void exportLogs() {
         try {
-            // Create export directory
-            File exportDir = new File(getExternalFilesDir(null), "TerrariaLoader/com.and.games505.TerrariaPaid/AppLogs");
+            File exportDir = new File(getExternalFilesDir(null), "exports");
             if (!exportDir.exists()) {
                 exportDir.mkdirs();
             }
             
-            // Create filename with timestamp
-            SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.getDefault());
-            String timestamp = dateFormat.format(new Date());
-            String filename = "TerrariaLoader_Logs_" + timestamp + ".txt";
-            File logFile = new File(exportDir, filename);
+            String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault())
+                .format(new Date());
+            File exportFile = new File(exportDir, "terraria_logs_" + timestamp + ".txt");
             
-            // Write logs to file
-            try (FileWriter writer = new FileWriter(logFile)) {
+            try (FileWriter writer = new FileWriter(exportFile)) {
                 writer.write("=== TerrariaLoader Log Export ===\n");
-                writer.write("Export Date: " + new Date().toString() + "\n");
-                writer.write("Total Logs: " + allLogs.size() + "\n");
-                writer.write("Filtered Logs: " + filteredLogs.size() + "\n");
-                writer.write("Current Filter: " + currentFilter + "\n");
-                writer.write("Current Level: " + currentLevel + "\n");
-                writer.write("Search Query: " + (searchQuery.isEmpty() ? "None" : searchQuery) + "\n");
-                writer.write("\n=== LOG CONTENT ===\n\n");
+                writer.write("Exported: " + new Date().toString() + "\n");
+                writer.write("Total Entries: " + allLogEntries.size() + "\n");
+                writer.write("Filtered Entries: " + filteredLogEntries.size() + "\n");
+                writer.write("Filters - Type: " + currentTypeFilter + ", Level: " + currentLevelFilter + "\n");
+                writer.write("Search Query: " + (currentSearchQuery.isEmpty() ? "None" : currentSearchQuery) + "\n");
+                writer.write("\n=== LOG ENTRIES ===\n\n");
                 
-                // Write filtered logs (what user is currently viewing)
-                for (String logLine : filteredLogs) {
-                    writer.write(logLine + "\n");
+                for (LogEntry entry : filteredLogEntries) {
+                    writer.write(entry.fullText + "\n");
                 }
-                
-                writer.write("\n=== END OF LOG ===\n");
             }
             
-            // Share the log file
+            // Share the exported file
             Intent shareIntent = new Intent(Intent.ACTION_SEND);
             shareIntent.setType("text/plain");
             shareIntent.putExtra(Intent.EXTRA_STREAM,
-                FileProvider.getUriForFile(this, getPackageName() + ".provider", logFile));
-            shareIntent.putExtra(Intent.EXTRA_SUBJECT, "TerrariaLoader Logs - " + timestamp);
-            shareIntent.putExtra(Intent.EXTRA_TEXT, "TerrariaLoader log export containing " + 
-                filteredLogs.size() + " log entries.");
+                FileProvider.getUriForFile(this, getPackageName() + ".provider", exportFile));
             shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
             
-            startActivity(Intent.createChooser(shareIntent, "📤 Share Logs"));
+            startActivity(Intent.createChooser(shareIntent, "Share Log Export"));
+            Toast.makeText(this, "✅ Logs exported: " + exportFile.getName(), Toast.LENGTH_LONG).show();
             
-            Toast.makeText(this, "✅ Logs exported: " + filename, Toast.LENGTH_LONG).show();
-            LogUtils.logUser("Logs exported to: " + logFile.getAbsolutePath());
-            
-        } catch (IOException e) {
-            Toast.makeText(this, "❌ Failed to export logs: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+        } catch (Exception e) {
+            Toast.makeText(this, "❌ Export failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
             LogUtils.logDebug("Log export error: " + e.getMessage());
         }
     }
     
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
-        getMenuInflater().inflate(R.menu.log_viewer_menu, menu);
+        menu.add(0, 1, 0, "⚙️ Settings")
+            .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
+        menu.add(0, 2, 0, "🔄 Toggle Auto-refresh")
+            .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
+        menu.add(0, 3, 0, "📤 Export Logs")
+            .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
         return true;
     }
     
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
-        int id = item.getItemId();
-        
-        if (id == android.R.id.home) {
-            finish();
-            return true;
-        } else if (id == R.id.action_toggle_filters) {
-            // Toggle filter section visibility
-            filterSection.setVisibility(
-                filterSection.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE);
-            return true;
-        } else if (id == R.id.action_share_logs) {
-            exportLogs();
-            return true;
-        } else if (id == R.id.action_clear_logs) {
-            showClearLogsDialog();
-            return true;
-        } else if (id == R.id.action_settings) {
-            showLogSettings();
-            return true;
+        switch (item.getItemId()) {
+            case 1:
+                showSettingsDialog();
+                return true;
+            case 2:
+                autoRefreshEnabled = !autoRefreshEnabled;
+                saveSettings(); // FIXED: Save when toggled
+                setupAutoRefresh();
+                String status = autoRefreshEnabled ? "enabled" : "disabled";
+                Toast.makeText(this, "🔄 Auto-refresh " + status, Toast.LENGTH_SHORT).show();
+                return true;
+            case 3:
+                exportLogs();
+                return true;
+            default:
+                return super.onOptionsItemSelected(item);
         }
-        
-        return super.onOptionsItemSelected(item);
-    }
-    
-    private void showLogSettings() {
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("⚙️ Log Viewer Settings");
-        
-        View settingsView = getLayoutInflater().inflate(R.layout.dialog_log_settings, null);
-        
-        CheckBox autoRefreshCheckbox = settingsView.findViewById(R.id.autoRefreshCheckbox);
-        CheckBox syntaxHighlightCheckbox = settingsView.findViewById(R.id.syntaxHighlightCheckbox);
-        SeekBar textSizeSeekBar = settingsView.findViewById(R.id.textSizeSeekBar);
-        TextView textSizeLabel = settingsView.findViewById(R.id.textSizeLabel);
-        
-        // Set current values
-        autoRefreshCheckbox.setChecked(refreshRunnable != null);
-        syntaxHighlightCheckbox.setChecked(true); // Always enabled for now
-        
-        int currentTextSize = (int) logTextView.getTextSize() / 4; // Convert to reasonable scale
-        textSizeSeekBar.setProgress(currentTextSize);
-        textSizeLabel.setText("Text Size: " + currentTextSize);
-        
-        textSizeSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override
-            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                textSizeLabel.setText("Text Size: " + progress);
-                logTextView.setTextSize(Math.max(8, progress));
-            }
-            
-            @Override
-            public void onStartTrackingTouch(SeekBar seekBar) {}
-            
-            @Override
-            public void onStopTrackingTouch(SeekBar seekBar) {}
-        });
-        
-        builder.setView(settingsView);
-        builder.setPositiveButton("Apply", (dialog, which) -> {
-            // Apply settings
-            if (autoRefreshCheckbox.isChecked() && refreshRunnable == null) {
-                startAutoRefresh();
-            } else if (!autoRefreshCheckbox.isChecked() && refreshRunnable != null) {
-                stopAutoRefresh();
-            }
-            
-            Toast.makeText(this, "Settings applied", Toast.LENGTH_SHORT).show();
-        });
-        builder.setNegativeButton("Cancel", null);
-        builder.show();
-    }
-    
-    @Override
-    protected void onDestroy() {
-        super.onDestroy();
-        stopAutoRefresh();
-        LogUtils.logUser("Advanced Log Viewer closed");
-    }
-    
-    @Override
-    protected void onPause() {
-        super.onPause();
-        // Stop auto-refresh when app is not visible
-        stopAutoRefresh();
     }
     
     @Override
     protected void onResume() {
         super.onResume();
-        // Resume auto-refresh when app becomes visible
-        startAutoRefresh();
-        loadLogs(); // Refresh logs when returning to activity
+        // Refresh logs when returning to activity
+        refreshLogs();
+        
+        // Restart auto-refresh if it was enabled
+        if (autoRefreshEnabled) {
+            setupAutoRefresh();
+        }
+    }
+    
+    @Override
+    protected void onPause() {
+        super.onPause();
+        // Stop auto-refresh when leaving activity
+        if (autoRefreshHandler != null && autoRefreshRunnable != null) {
+            autoRefreshHandler.removeCallbacks(autoRefreshRunnable);
+        }
+        
+        // FIXED: Save settings when leaving activity
+        saveSettings();
+    }
+    
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        // Clean up resources
+        if (executorService != null && !executorService.isShutdown()) {
+            executorService.shutdown();
+        }
+        if (autoRefreshHandler != null && autoRefreshRunnable != null) {
+            autoRefreshHandler.removeCallbacks(autoRefreshRunnable);
+        }
+        
+        LogUtils.logUser("Advanced Log Viewer closed");
     }
 }
 
-================================================================================
-
-/storage/emulated/0/AndroidIDEProjects/TerrariaML/main/java/com/modloader/ui/LogViewerEnhancedActivity.java
+--------------------------------------------------------------------------------
+/ModLoader/app/src/main/java/com/modloader/ui/LogViewerEnhancedActivity.java
 
 // File: LogViewerEnhancedActivity.java - Enhanced log viewer with filtering and search
 // Path: /app/src/main/java/com/modloader/ui/LogViewerEnhancedActivity.java
@@ -6272,9 +9094,8 @@ public class LogViewerEnhancedActivity extends AppCompatActivity {
     }
 }
 
-================================================================================
-
-/storage/emulated/0/AndroidIDEProjects/TerrariaML/main/java/com/modloader/ui/ModListActivity.java
+--------------------------------------------------------------------------------
+/ModLoader/app/src/main/java/com/modloader/ui/ModListActivity.java
 
 package com.modloader.ui;
 
@@ -6432,10 +9253,8 @@ public class ModListActivity extends AppCompatActivity {
     }
 }
 
-
-================================================================================
-
-/storage/emulated/0/AndroidIDEProjects/TerrariaML/main/java/com/modloader/ui/ModListAdapter.java
+--------------------------------------------------------------------------------
+/ModLoader/app/src/main/java/com/modloader/ui/ModListAdapter.java
 
 // File: ModListAdapter.java (Fixed Adapter Class) - NullPointerException Fix
 // Path: /storage/emulated/0/AndroidIDEProjects/TerrariaML/app/src/main/java/com/terrarialoader/ui/ModListAdapter.java
@@ -6602,10 +9421,8 @@ public class ModListAdapter extends RecyclerView.Adapter<ModListAdapter.ModViewH
     }
 }
 
-
-================================================================================
-
-/storage/emulated/0/AndroidIDEProjects/TerrariaML/main/java/com/modloader/ui/ModManagementActivity.java
+--------------------------------------------------------------------------------
+/ModLoader/app/src/main/java/com/modloader/ui/ModManagementActivity.java
 
 // File: ModManagementActivity.java - Pure Mod Management (Post-Installation)
 // Path: /main/java/com/terrarialoader/ui/ModManagementActivity.java
@@ -6902,2495 +9719,4 @@ public class ModManagementActivity extends AppCompatActivity {
     }
 }
 
-================================================================================
-
-/storage/emulated/0/AndroidIDEProjects/TerrariaML/main/java/com/modloader/ui/OfflineDiagnosticActivity.java
-
-// File: OfflineDiagnosticActivity.java (Part 1 - Main Class)
-// Path: /main/java/com/terrarialoader/ui/OfflineDiagnosticActivity.java
-
-package com.modloader.ui;
-
-import android.app.ProgressDialog;
-import android.content.Intent;
-import android.net.Uri;
-import android.os.AsyncTask;
-import android.os.Bundle;
-import android.widget.Button;
-import android.widget.TextView;
-import android.widget.Toast;
-
-import androidx.activity.result.ActivityResultLauncher;
-import androidx.activity.result.contract.ActivityResultContracts;
-import androidx.appcompat.app.AlertDialog;
-import androidx.appcompat.app.AppCompatActivity;
-import androidx.core.content.FileProvider;
-
-import com.modloader.R;
-import com.modloader.diagnostic.DiagnosticManager;
-import com.modloader.util.LogUtils;
-import com.modloader.util.FileUtils;
-import com.modloader.util.PathManager;
-import com.modloader.loader.MelonLoaderManager;
-
-import java.io.File;
-import java.io.FileWriter;
-import java.io.IOException;
-
-public class OfflineDiagnosticActivity extends AppCompatActivity {
-    
-    private DiagnosticManager diagnosticManager;
-    
-    // UI Components
-    private Button btnRunFullDiagnostic;
-    private Button btnDiagnoseApk;
-    private Button btnFixSettings;
-    private Button btnAutoRepair;
-    private Button btnExportReport;
-    private Button btnClearResults;
-    private TextView diagnosticResultsText;
-    
-    // Progress dialog
-    private ProgressDialog progressDialog;
-    
-    // File picker for APK selection
-    private final ActivityResultLauncher<Intent> apkPickerLauncher = 
-        registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
-            if (result.getResultCode() == RESULT_OK && result.getData() != null) {
-                Uri apkUri = result.getData().getData();
-                runApkDiagnostic(apkUri);
-            }
-        });
-    
-    @Override
-    protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_offline_diagnostic);
-        setTitle("🔧 Offline Diagnostics");
-        
-        initializeComponents();
-        setupUI();
-        
-        LogUtils.logUser("Offline Diagnostics opened");
-    }
-    
-    private void initializeComponents() {
-        diagnosticManager = new DiagnosticManager(this);
-        
-        // Find UI components
-        btnRunFullDiagnostic = findViewById(R.id.btn_run_full_diagnostic);
-        btnDiagnoseApk = findViewById(R.id.btn_diagnose_apk);
-        btnFixSettings = findViewById(R.id.btn_fix_settings);
-        btnAutoRepair = findViewById(R.id.btn_auto_repair);
-        btnExportReport = findViewById(R.id.btn_export_report);
-        btnClearResults = findViewById(R.id.btn_clear_results);
-        diagnosticResultsText = findViewById(R.id.diagnostic_results_text);
-    }
-    
-    private void setupUI() {
-        // Full system diagnostic
-        btnRunFullDiagnostic.setOnClickListener(v -> runFullSystemCheck());
-        
-        // APK diagnostic
-        btnDiagnoseApk.setOnClickListener(v -> selectApkForDiagnostic());
-        
-        // Settings diagnostic and fix
-        btnFixSettings.setOnClickListener(v -> diagnoseAndFixSettings());
-        
-        // Auto repair
-        btnAutoRepair.setOnClickListener(v -> performAutoRepair());
-        
-        // Export report
-        btnExportReport.setOnClickListener(v -> exportDiagnosticReport());
-        
-        // Clear results
-        btnClearResults.setOnClickListener(v -> clearResults());
-    }
-    
-    private void runFullSystemCheck() {
-        showProgress("Running comprehensive system diagnostic...");
-        
-        AsyncTask.execute(() -> {
-            try {
-                StringBuilder results = new StringBuilder();
-                results.append("=== TerrariaLoader Comprehensive Diagnostic ===\n");
-                results.append("Timestamp: ").append(new java.util.Date().toString()).append("\n");
-                results.append("Device: ").append(android.os.Build.MANUFACTURER).append(" ")
-                       .append(android.os.Build.MODEL).append("\n");
-                results.append("Android: ").append(android.os.Build.VERSION.RELEASE).append("\n\n");
-                
-                // 1. Directory Structure Check
-                results.append("📁 DIRECTORY STRUCTURE\n");
-                results.append(checkDirectoryStructure()).append("\n");
-                
-                // 2. MelonLoader/LemonLoader Status
-                results.append("🛠️ LOADER STATUS\n");
-                results.append(checkLoaderStatus()).append("\n");
-                
-                // 3. Mod Files Validation
-                results.append("📦 MOD FILES\n");
-                results.append(checkModFiles()).append("\n");
-                
-                // 4. System Permissions
-                results.append("🔐 PERMISSIONS\n");
-                results.append(checkPermissions()).append("\n");
-                
-                // 5. Storage and Space
-                results.append("💾 STORAGE\n");
-                results.append(checkStorage()).append("\n");
-                
-                // 6. Settings Validation
-                results.append("⚙️ SETTINGS\n");
-                results.append(checkSettingsIntegrity()).append("\n");
-                
-                // 7. Suggested Actions
-                results.append("💡 RECOMMENDATIONS\n");
-                results.append(generateRecommendations()).append("\n");
-                
-                runOnUiThread(() -> {
-                    hideProgress();
-                    displayResults(results.toString());
-                    LogUtils.logUser("Full system diagnostic completed");
-                });
-            } catch (Exception e) {
-                runOnUiThread(() -> {
-                    hideProgress();
-                    showError("Diagnostic failed: " + e.getMessage());
-                    LogUtils.logDebug("Diagnostic error: " + e.toString());
-                });
-            }
-        });
-    }
-    
-    private String checkDirectoryStructure() {
-        StringBuilder result = new StringBuilder();
-        
-        try {
-            String gamePackage = "com.and.games505.TerrariaPaid";
-            File baseDir = PathManager.getGameBaseDir(this, gamePackage);
-            
-            if (baseDir == null) {
-                result.append("❌ Base directory path is null\n");
-                return result.toString();
-            }
-            
-            result.append("Base Path: ").append(baseDir.getAbsolutePath()).append("\n");
-            
-            // Check key directories
-            String[] criticalPaths = {
-                "",                           // Base
-                "Mods",                      // Mods root
-                "Mods/DEX",                  // DEX mods
-                "Mods/DLL",                  // DLL mods
-                "Loaders",                   // Loaders root
-                "Loaders/MelonLoader",       // MelonLoader
-                "Logs",                      // Game logs
-                "AppLogs",                   // App logs
-                "Config",                    // Configuration
-                "Backups"                    // Backups
-            };
-            
-            int existingDirs = 0;
-            for (String path : criticalPaths) {
-                File dir = new File(baseDir, path);
-                boolean exists = dir.exists() && dir.isDirectory();
-                String status = exists ? "✅" : "❌";
-                result.append(status).append(" ").append(path.isEmpty() ? "Base" : path).append("\n");
-                if (exists) existingDirs++;
-            }
-            
-            result.append("\nDirectory Health: ").append(existingDirs).append("/").append(criticalPaths.length);
-            if (existingDirs < criticalPaths.length) {
-                result.append(" (⚠️ Some directories missing)");
-            } else {
-                result.append(" (✅ Complete)");
-            }
-            
-        } catch (Exception e) {
-            result.append("❌ Directory check failed: ").append(e.getMessage());
-        }
-        
-        return result.toString();
-    }
-    
-    private String checkLoaderStatus() {
-        StringBuilder result = new StringBuilder();
-        
-        try {
-            String gamePackage = "com.and.games505.TerrariaPaid";
-            boolean melonInstalled = MelonLoaderManager.isMelonLoaderInstalled(this);
-            boolean lemonInstalled = MelonLoaderManager.isLemonLoaderInstalled(this);
-            
-            if (melonInstalled) {
-                result.append("✅ MelonLoader detected\n");
-                result.append("   Version: ").append(MelonLoaderManager.getInstalledLoaderVersion()).append("\n");
-                
-                // Check core files
-                File loaderDir = PathManager.getMelonLoaderDir(this, gamePackage);
-                if (loaderDir != null && loaderDir.exists()) {
-                    File[] files = loaderDir.listFiles();
-                    int fileCount = (files != null) ? files.length : 0;
-                    result.append("   Files: ").append(fileCount).append(" detected\n");
-                }
-            } else if (lemonInstalled) {
-                result.append("✅ LemonLoader detected\n");
-                result.append("   Version: ").append(MelonLoaderManager.getInstalledLoaderVersion()).append("\n");
-            } else {
-                result.append("❌ No loader installed\n");
-                result.append("   Recommendation: Use 'Complete Setup Wizard' to install MelonLoader\n");
-            }
-            
-            // Check runtime directories
-            File net8Dir = new File(PathManager.getMelonLoaderDir(this, gamePackage), "net8");
-            File net35Dir = new File(PathManager.getMelonLoaderDir(this, gamePackage), "net35");
-            
-            result.append("Runtime Support:\n");
-            result.append(net8Dir.exists() ? "✅" : "❌").append(" NET8 Runtime\n");
-            result.append(net35Dir.exists() ? "✅" : "❌").append(" NET35 Runtime\n");
-            
-        } catch (Exception e) {
-            result.append("❌ Loader check failed: ").append(e.getMessage()).append("\n");
-        }
-        
-        return result.toString();
-    }
-    
-    private String checkModFiles() {
-        StringBuilder result = new StringBuilder();
-        
-        try {
-            String gamePackage = "com.and.games505.TerrariaPaid";
-            
-            // Check DEX mods
-            File dexDir = PathManager.getDexModsDir(this, gamePackage);
-            int dexCount = 0, dexEnabled = 0;
-            if (dexDir != null && dexDir.exists()) {
-                File[] dexFiles = dexDir.listFiles((dir, name) -> {
-                    String lower = name.toLowerCase();
-                    return lower.endsWith(".dex") || lower.endsWith(".jar") || 
-                           lower.endsWith(".dex.disabled") || lower.endsWith(".jar.disabled");
-                });
-                if (dexFiles != null) {
-                    dexCount = dexFiles.length;
-                    for (File file : dexFiles) {
-                        if (!file.getName().endsWith(".disabled")) {
-                            dexEnabled++;
-                        }
-                    }
-                }
-            }
-            
-            // Check DLL mods
-            File dllDir = PathManager.getDllModsDir(this, gamePackage);
-            int dllCount = 0, dllEnabled = 0;
-            if (dllDir != null && dllDir.exists()) {
-                File[] dllFiles = dllDir.listFiles((dir, name) -> {
-                    String lower = name.toLowerCase();
-                    return lower.endsWith(".dll") || lower.endsWith(".dll.disabled");
-                });
-                if (dllFiles != null) {
-                    dllCount = dllFiles.length;
-                    for (File file : dllFiles) {
-                        if (!file.getName().endsWith(".disabled")) {
-                            dllEnabled++;
-                        }
-                    }
-                }
-            }
-            
-            result.append("DEX/JAR Mods: ").append(dexEnabled).append("/").append(dexCount)
-                  .append(" enabled\n");
-            result.append("DLL Mods: ").append(dllEnabled).append("/").append(dllCount)
-                  .append(" enabled\n");
-            result.append("Total Active Mods: ").append(dexEnabled + dllEnabled).append("\n");
-            
-            if (dexCount == 0 && dllCount == 0) {
-                result.append("ℹ️ No mods installed - use Mod Management to add mods\n");
-            }
-            
-        } catch (Exception e) {
-            result.append("❌ Mod check failed: ").append(e.getMessage()).append("\n");
-        }
-        
-        return result.toString();
-    }
-    
-    private String checkPermissions() {
-        StringBuilder result = new StringBuilder();
-        
-        try {
-            // Test write permissions
-            File testDir = new File(getExternalFilesDir(null), "permission_test");
-            testDir.mkdirs();
-            
-            File testFile = new File(testDir, "write_test.txt");
-            try (FileWriter writer = new FileWriter(testFile)) {
-                writer.write("Permission test successful");
-                result.append("✅ External storage write access\n");
-            } catch (Exception e) {
-                result.append("❌ External storage write failed: ").append(e.getMessage()).append("\n");
-            } finally {
-                if (testFile.exists()) testFile.delete();
-                testDir.delete();
-            }
-            
-            // Check install packages permission
-            try {
-                getPackageManager().canRequestPackageInstalls();
-                result.append("✅ Package installation permission available\n");
-            } catch (Exception e) {
-                result.append("⚠️ Package installation permission may be restricted\n");
-            }
-            
-        } catch (Exception e) {
-            result.append("❌ Permission check failed: ").append(e.getMessage()).append("\n");
-        }
-        
-        return result.toString();
-    }
-    
-    private String checkStorage() {
-        StringBuilder result = new StringBuilder();
-        
-        try {
-            File externalDir = getExternalFilesDir(null);
-            if (externalDir != null) {
-                long freeSpace = externalDir.getFreeSpace();
-                long totalSpace = externalDir.getTotalSpace();
-                long usedSpace = totalSpace - freeSpace;
-                
-                result.append("Free Space: ").append(FileUtils.formatFileSize(freeSpace)).append("\n");
-                result.append("Used Space: ").append(FileUtils.formatFileSize(usedSpace)).append("\n");
-                result.append("Total Space: ").append(FileUtils.formatFileSize(totalSpace)).append("\n");
-                
-                if (freeSpace < 100 * 1024 * 1024) { // Less than 100MB
-                    result.append("⚠️ Low storage space - consider freeing up space\n");
-                } else {
-                    result.append("✅ Sufficient storage space available\n");
-                }
-            } else {
-                result.append("❌ Cannot access external storage\n");
-            }
-            
-        } catch (Exception e) {
-            result.append("❌ Storage check failed: ").append(e.getMessage()).append("\n");
-        }
-        
-        return result.toString();
-    }
-    
-    private String checkSettingsIntegrity() {
-        StringBuilder result = new StringBuilder();
-        
-        try {
-            // Check app preferences
-            android.content.SharedPreferences prefs = 
-                getSharedPreferences("TerrariaLoaderPrefs", MODE_PRIVATE);
-            
-            // Test write operation
-            android.content.SharedPreferences.Editor editor = prefs.edit();
-            editor.putString("diagnostic_test", "test_value");
-            boolean writeSuccess = editor.commit();
-            
-            if (writeSuccess) {
-                String testValue = prefs.getString("diagnostic_test", null);
-                if ("test_value".equals(testValue)) {
-                    result.append("✅ Settings persistence working\n");
-                    // Clean up test
-                    editor.remove("diagnostic_test").commit();
-                } else {
-                    result.append("❌ Settings read/write mismatch\n");
-                }
-            } else {
-                result.append("❌ Settings write failed\n");
-                result.append("   This may explain your auto-refresh issue\n");
-            }
-            
-        } catch (Exception e) {
-            result.append("❌ Settings check failed: ").append(e.getMessage()).append("\n");
-        }
-        
-        return result.toString();
-    }
-    
-    private String generateRecommendations() {
-        StringBuilder result = new StringBuilder();
-        
-        try {
-            boolean hasIssues = false;
-            
-            // Check if directories need repair
-            File baseDir = PathManager.getGameBaseDir(this, "com.and.games505.TerrariaPaid");
-            if (baseDir == null || !baseDir.exists()) {
-                result.append("• Run 'Auto-Repair' to create missing directories\n");
-                hasIssues = true;
-            }
-            
-            // Check if loader is missing
-            if (!MelonLoaderManager.isMelonLoaderInstalled(this) && 
-                !MelonLoaderManager.isLemonLoaderInstalled(this)) {
-                result.append("• Use 'Complete Setup Wizard' to install MelonLoader\n");
-                hasIssues = true;
-            }
-            
-            // Check storage
-            File externalDir = getExternalFilesDir(null);
-            if (externalDir != null && externalDir.getFreeSpace() < 50 * 1024 * 1024) {
-                result.append("• Free up storage space (recommended: 100MB+)\n");
-                hasIssues = true;
-            }
-            
-            if (!hasIssues) {
-                result.append("✅ System appears to be in good condition\n");
-                result.append("• If you're still experiencing issues, try:\n");
-                result.append("  - Restart the app completely\n");
-                result.append("  - Reboot your device\n");
-                result.append("  - Check specific mod compatibility\n");
-            }
-            
-        } catch (Exception e) {
-            result.append("• General recommendation: Check system permissions\n");
-        }
-        
-        return result.toString();
-    }
-    
-    // Continue to Part 2...
-// File: OfflineDiagnosticActivity.java (Part 2 - Methods & UI)
-// Continuation of Part 1
-
-    private void selectApkForDiagnostic() {
-        Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
-        intent.setType("application/vnd.android.package-archive");
-        intent.addCategory(Intent.CATEGORY_OPENABLE);
-        
-        try {
-            apkPickerLauncher.launch(Intent.createChooser(intent, "Select APK to Diagnose"));
-        } catch (Exception e) {
-            showToast("No file manager available");
-        }
-    }
-    
-    private void runApkDiagnostic(Uri apkUri) {
-        showProgress("Analyzing APK installation issues...");
-        
-        AsyncTask.execute(() -> {
-            try {
-                StringBuilder results = new StringBuilder();
-                results.append("=== APK Installation Diagnostic ===\n");
-                results.append("File URI: ").append(apkUri.toString()).append("\n\n");
-                
-                String fileName = getFileNameFromUri(apkUri);
-                results.append("File Name: ").append(fileName != null ? fileName : "Unknown").append("\n");
-                
-                results.append(validateApkFromUri(apkUri)).append("\n");
-                results.append("🔧 INSTALLATION ENVIRONMENT\n");
-                results.append(checkInstallationEnvironment()).append("\n");
-                results.append("📱 DEVICE COMPATIBILITY\n");
-                results.append(checkDeviceCompatibility()).append("\n");
-                results.append("💡 SOLUTIONS FOR APK PARSING ERRORS\n");
-                results.append(getApkSolutions()).append("\n");
-                
-                runOnUiThread(() -> {
-                    hideProgress();
-                    displayResults(results.toString());
-                });
-            } catch (Exception e) {
-                runOnUiThread(() -> {
-                    hideProgress();
-                    showError("APK analysis failed: " + e.getMessage());
-                });
-            }
-        });
-    }
-    
-    private String validateApkFromUri(Uri apkUri) {
-        StringBuilder result = new StringBuilder();
-        result.append("📦 APK VALIDATION\n");
-        
-        try (java.io.InputStream stream = getContentResolver().openInputStream(apkUri)) {
-            if (stream == null) {
-                result.append("❌ Cannot access APK file\n");
-                return result.toString();
-            }
-            
-            int available = stream.available();
-            if (available > 0) {
-                result.append("✅ APK accessible (").append(FileUtils.formatFileSize(available)).append(")\n");
-                if (available < 10 * 1024 * 1024) {
-                    result.append("⚠️ APK seems small for Terraria - may be corrupted\n");
-                }
-            } else {
-                result.append("⚠️ APK file size unknown or empty\n");
-            }
-            
-            byte[] header = new byte[30];
-            int bytesRead = stream.read(header);
-            
-            if (bytesRead >= 4) {
-                if (header[0] == 0x50 && header[1] == 0x4b && header[2] == 0x03 && header[3] == 0x04) {
-                    result.append("✅ Valid ZIP/APK signature\n");
-                } else {
-                    result.append("❌ Invalid ZIP/APK signature - file is corrupted\n");
-                    result.append("   This is likely causing your parsing error!\n");
-                }
-            } else {
-                result.append("❌ Cannot read APK header - file corrupted\n");
-            }
-            
-        } catch (Exception e) {
-            result.append("❌ APK access failed: ").append(e.getMessage()).append("\n");
-        }
-        
-        return result.toString();
-    }
-    
-    private String checkInstallationEnvironment() {
-        StringBuilder result = new StringBuilder();
-        
-        try {
-            boolean unknownSources = canInstallFromUnknownSources();
-            result.append(unknownSources ? "✅" : "❌").append(" Unknown sources enabled\n");
-            
-            if (!unknownSources) {
-                result.append("   📋 Fix: Settings > Apps > TerrariaLoader > Install unknown apps\n");
-            }
-            
-            File dataDir = getDataDir();
-            long freeSpace = dataDir.getFreeSpace();
-            result.append("Internal space: ").append(FileUtils.formatFileSize(freeSpace)).append("\n");
-            
-            if (freeSpace < 200 * 1024 * 1024) {
-                result.append("⚠️ Low storage - may cause installation failure\n");
-            }
-            
-            try {
-                getPackageManager().getPackageInfo("com.and.games505.TerrariaPaid", 0);
-                result.append("⚠️ Terraria already installed - uninstall first\n");
-            } catch (android.content.pm.PackageManager.NameNotFoundException e) {
-                result.append("✅ No conflicting installation\n");
-            }
-            
-        } catch (Exception e) {
-            result.append("❌ Environment check failed: ").append(e.getMessage()).append("\n");
-        }
-        
-        return result.toString();
-    }
-    
-    private boolean canInstallFromUnknownSources() {
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-            return getPackageManager().canRequestPackageInstalls();
-        } else {
-            try {
-                return android.provider.Settings.Secure.getInt(
-                    getContentResolver(), 
-                    android.provider.Settings.Secure.INSTALL_NON_MARKET_APPS, 0) != 0;
-            } catch (Exception e) {
-                return false;
-            }
-        }
-    }
-    
-    private String checkDeviceCompatibility() {
-        StringBuilder result = new StringBuilder();
-        
-        result.append("Device: ").append(android.os.Build.MANUFACTURER)
-              .append(" ").append(android.os.Build.MODEL).append("\n");
-        result.append("Android: ").append(android.os.Build.VERSION.RELEASE)
-              .append(" (API ").append(android.os.Build.VERSION.SDK_INT).append(")\n");
-        result.append("Architecture: ").append(android.os.Build.SUPPORTED_ABIS[0]).append("\n");
-        
-        if (android.os.Build.VERSION.SDK_INT >= 21) {
-            result.append("✅ Compatible Android version\n");
-        } else {
-            result.append("❌ Android version too old\n");
-        }
-        
-        return result.toString();
-    }
-    
-    private String getApkSolutions() {
-        StringBuilder result = new StringBuilder();
-        
-        result.append("For 'There was a problem parsing the package':\n\n");
-        result.append("1. 🔧 Re-download APK (may be corrupted)\n");
-        result.append("2. 🔧 Enable 'Install unknown apps'\n");
-        result.append("3. 🔧 Uninstall original Terraria first\n");
-        result.append("4. 🔧 Clear Package Installer cache\n");
-        result.append("5. 🔧 Restart device and retry\n");
-        result.append("6. 🔧 Copy APK to internal storage\n");
-        result.append("7. 🔧 Use different file manager\n");
-        result.append("8. 🔧 Check antivirus isn't blocking\n");
-        
-        return result.toString();
-    }
-    
-    private void diagnoseAndFixSettings() {
-        showProgress("Diagnosing settings persistence...");
-        
-        AsyncTask.execute(() -> {
-            try {
-                StringBuilder results = new StringBuilder();
-                results.append("=== Settings Persistence Diagnostic ===\n\n");
-                results.append("🔧 SHARED PREFERENCES TEST\n");
-                results.append(testSharedPreferences()).append("\n");
-                results.append("🔄 AUTO-REFRESH SPECIFIC TEST\n");
-                results.append(testAutoRefreshSetting()).append("\n");
-                results.append("💾 FILE SYSTEM TEST\n");
-                results.append(testFileSystemWrites()).append("\n");
-                
-                runOnUiThread(() -> {
-                    hideProgress();
-                    displayResults(results.toString());
-                    showSettingsFixOptions();
-                });
-            } catch (Exception e) {
-                runOnUiThread(() -> {
-                    hideProgress();
-                    showError("Settings diagnostic failed: " + e.getMessage());
-                });
-            }
-        });
-    }
-    
-    private String testSharedPreferences() {
-        StringBuilder result = new StringBuilder();
-        
-        try {
-            android.content.SharedPreferences prefs = getSharedPreferences("DiagnosticTest", MODE_PRIVATE);
-            android.content.SharedPreferences.Editor editor = prefs.edit();
-            
-            editor.putBoolean("test_bool", true);
-            editor.putString("test_string", "test_value");
-            boolean commitSuccess = editor.commit();
-            
-            result.append("Write test: ").append(commitSuccess ? "✅ Success" : "❌ Failed").append("\n");
-            
-            if (commitSuccess) {
-                boolean boolVal = prefs.getBoolean("test_bool", false);
-                String stringVal = prefs.getString("test_string", null);
-                boolean readSuccess = boolVal && "test_value".equals(stringVal);
-                
-                result.append("Read test: ").append(readSuccess ? "✅ Success" : "❌ Failed").append("\n");
-                
-                if (!readSuccess) {
-                    result.append("   This explains your auto-refresh issue!\n");
-                }
-                
-                editor.clear().commit();
-            }
-            
-        } catch (Exception e) {
-            result.append("❌ SharedPreferences test failed: ").append(e.getMessage()).append("\n");
-        }
-        
-        return result.toString();
-    }
-    
-    private String testAutoRefreshSetting() {
-        StringBuilder result = new StringBuilder();
-        
-        try {
-            // Simulate the exact auto-refresh setting behavior
-            android.content.SharedPreferences logPrefs = getSharedPreferences("LogViewerPrefs", MODE_PRIVATE);
-            android.content.SharedPreferences.Editor editor = logPrefs.edit();
-            
-            // Test the specific setting that's failing
-            editor.putBoolean("auto_refresh_enabled", false);
-            boolean applyResult = editor.commit(); // Use commit instead of apply for immediate result
-            
-            result.append("Auto-refresh disable: ").append(applyResult ? "✅ Success" : "❌ Failed").append("\n");
-            
-            if (applyResult) {
-                // Check if it actually persisted
-                boolean currentValue = logPrefs.getBoolean("auto_refresh_enabled", true); // default true
-                result.append("Setting persisted: ").append(!currentValue ? "✅ Success" : "❌ Failed").append("\n");
-                
-                if (currentValue) {
-                    result.append("   Setting reverted to default - persistence failed!\n");
-                    result.append("   This is your exact issue.\n");
-                }
-            }
-            
-        } catch (Exception e) {
-            result.append("❌ Auto-refresh test failed: ").append(e.getMessage()).append("\n");
-        }
-        
-        return result.toString();
-    }
-    
-    private String testFileSystemWrites() {
-        StringBuilder result = new StringBuilder();
-        
-        try {
-            File testDir = new File(getFilesDir(), "diagnostic_test");
-            testDir.mkdirs();
-            
-            File testFile = new File(testDir, "settings_test.txt");
-            
-            try (FileWriter writer = new FileWriter(testFile)) {
-                writer.write("auto_refresh=false\n");
-                writer.write("timestamp=" + System.currentTimeMillis() + "\n");
-                result.append("✅ File write successful\n");
-            }
-            
-            if (testFile.exists()) {
-                try (java.io.BufferedReader reader = new java.io.BufferedReader(
-                        new java.io.FileReader(testFile))) {
-                    String line = reader.readLine();
-                    if (line != null && line.contains("auto_refresh=false")) {
-                        result.append("✅ File read successful\n");
-                    } else {
-                        result.append("❌ File content corrupted\n");
-                    }
-                }
-            }
-            
-            testFile.delete();
-            testDir.delete();
-            
-        } catch (Exception e) {
-            result.append("❌ File system test failed: ").append(e.getMessage()).append("\n");
-        }
-        
-        return result.toString();
-    }
-    
-    private String getFileNameFromUri(Uri uri) {
-        try {
-            android.database.Cursor cursor = getContentResolver().query(uri, null, null, null, null);
-            if (cursor != null) {
-                int nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME);
-                if (nameIndex >= 0 && cursor.moveToFirst()) {
-                    String name = cursor.getString(nameIndex);
-                    cursor.close();
-                    return name;
-                }
-                cursor.close();
-            }
-        } catch (Exception e) {
-            return uri.getLastPathSegment();
-        }
-        return null;
-    }
-    
-    private void performAutoRepair() {
-        new AlertDialog.Builder(this)
-            .setTitle("Auto-Repair System")
-            .setMessage("Attempt automatic fixes for:\n\n" +
-                       "• Missing directories\n" +
-                       "• Settings persistence\n" +
-                       "• File permissions\n" +
-                       "• Configuration corruption\n\n" +
-                       "Continue?")
-            .setPositiveButton("Yes, Repair", (dialog, which) -> executeAutoRepair())
-            .setNegativeButton("Cancel", null)
-            .show();
-    }
-    
-    private void executeAutoRepair() {
-        showProgress("Performing auto-repair...");
-        
-        AsyncTask.execute(() -> {
-            try {
-                StringBuilder results = new StringBuilder();
-                results.append("=== Auto-Repair Results ===\n\n");
-                
-                boolean directoryRepair = diagnosticManager.attemptSelfRepair();
-                boolean settingsRepair = repairSettings();
-                boolean permissionRepair = repairPermissions();
-                
-                results.append("Directory Structure: ").append(directoryRepair ? "✅ Fixed" : "❌ Failed").append("\n");
-                results.append("Settings Persistence: ").append(settingsRepair ? "✅ Fixed" : "❌ Failed").append("\n");
-                results.append("Permissions: ").append(permissionRepair ? "✅ Fixed" : "❌ Failed").append("\n\n");
-                
-                if (directoryRepair || settingsRepair || permissionRepair) {
-                    results.append("🔄 Restart recommended to apply changes.\n");
-                } else {
-                    results.append("❌ Could not auto-fix detected issues.\n");
-                    results.append("💡 Try manual solutions or check device settings.\n");
-                }
-                
-                runOnUiThread(() -> {
-                    hideProgress();
-                    displayResults(results.toString());
-                });
-            } catch (Exception e) {
-                runOnUiThread(() -> {
-                    hideProgress();
-                    showError("Auto-repair failed: " + e.getMessage());
-                });
-            }
-        });
-    }
-    
-    private boolean repairSettings() {
-        try {
-            // Clear all shared preferences and recreate
-            String[] prefFiles = {"TerrariaLoaderPrefs", "LogViewerPrefs", "AppSettings"};
-            
-            for (String prefFile : prefFiles) {
-                android.content.SharedPreferences prefs = getSharedPreferences(prefFile, MODE_PRIVATE);
-                android.content.SharedPreferences.Editor editor = prefs.edit();
-                editor.clear();
-                if (!editor.commit()) {
-                    return false;
-                }
-            }
-            
-            // Test write after clear
-            android.content.SharedPreferences testPrefs = getSharedPreferences("TerrariaLoaderPrefs", MODE_PRIVATE);
-            android.content.SharedPreferences.Editor testEditor = testPrefs.edit();
-            testEditor.putBoolean("settings_repaired", true);
-            return testEditor.commit();
-            
-        } catch (Exception e) {
-            LogUtils.logDebug("Settings repair failed: " + e.getMessage());
-            return false;
-        }
-    }
-    
-    private boolean repairPermissions() {
-        try {
-            File testDir = new File(getExternalFilesDir(null), "permission_test");
-            testDir.mkdirs();
-            
-            File testFile = new File(testDir, "test.txt");
-            FileWriter writer = new FileWriter(testFile);
-            writer.write("test");
-            writer.close();
-            
-            boolean canWrite = testFile.exists() && testFile.length() > 0;
-            testFile.delete();
-            testDir.delete();
-            
-            return canWrite;
-        } catch (Exception e) {
-            return false;
-        }
-    }
-    
-    private void exportDiagnosticReport() {
-        try {
-            String reportContent = diagnosticResultsText.getText().toString();
-            if (reportContent.isEmpty() || reportContent.startsWith("Click")) {
-                showToast("No diagnostic results to export");
-                return;
-            }
-            
-            File reportsDir = new File(getExternalFilesDir(null), "DiagnosticReports");
-            reportsDir.mkdirs();
-            
-            String timestamp = new java.text.SimpleDateFormat("yyyyMMdd_HHmmss", 
-                java.util.Locale.getDefault()).format(new java.util.Date());
-            File reportFile = new File(reportsDir, "diagnostic_" + timestamp + ".txt");
-            
-            try (FileWriter writer = new FileWriter(reportFile)) {
-                writer.write(reportContent);
-                writer.write("\n\n=== Export Info ===\n");
-                writer.write("Exported by: TerrariaLoader Diagnostic Tool\n");
-                writer.write("Export time: " + new java.util.Date().toString() + "\n");
-            }
-            
-            // Share the report
-            Uri fileUri = FileProvider.getUriForFile(this, 
-                getPackageName() + ".provider", reportFile);
-            
-            Intent shareIntent = new Intent(Intent.ACTION_SEND);
-            shareIntent.setType("text/plain");
-            shareIntent.putExtra(Intent.EXTRA_STREAM, fileUri);
-            shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            
-            startActivity(Intent.createChooser(shareIntent, "Share Diagnostic Report"));
-            showToast("Report exported: " + reportFile.getName());
-            
-        } catch (Exception e) {
-            showError("Export failed: " + e.getMessage());
-        }
-    }
-    
-    private void clearResults() {
-        diagnosticResultsText.setText("Click 'Run Full System Check' to start diagnostics...");
-    }
-    
-    private void showSettingsFixOptions() {
-        new AlertDialog.Builder(this)
-            .setTitle("Settings Fix Options")
-            .setMessage("Settings persistence issue detected. Try these fixes:")
-            .setPositiveButton("Clear All Settings", (dialog, which) -> clearAllSettings())
-            .setNeutralButton("Reset App Data", (dialog, which) -> showResetAppDataInfo())
-            .setNegativeButton("Cancel", null)
-            .show();
-    }
-    
-    private void clearAllSettings() {
-        try {
-            String[] prefFiles = {"TerrariaLoaderPrefs", "LogViewerPrefs", "AppSettings"};
-            for (String prefFile : prefFiles) {
-                getSharedPreferences(prefFile, MODE_PRIVATE).edit().clear().commit();
-            }
-            showToast("Settings cleared - restart app to test");
-        } catch (Exception e) {
-            showError("Failed to clear settings: " + e.getMessage());
-        }
-    }
-    
-    private void showResetAppDataInfo() {
-        new AlertDialog.Builder(this)
-            .setTitle("Reset App Data")
-            .setMessage("To completely reset TerrariaLoader:\n\n" +
-                       "1. Go to Android Settings\n" +
-                       "2. Apps > TerrariaLoader\n" +
-                       "3. Storage > Clear Data\n\n" +
-                       "This will fix persistent settings issues.")
-            .setPositiveButton("OK", null)
-            .show();
-    }
-    
-    private void displayResults(String results) {
-        diagnosticResultsText.setText(results);
-    }
-    
-    private void showProgress(String message) {
-        progressDialog = new ProgressDialog(this);
-        progressDialog.setMessage(message);
-        progressDialog.setCancelable(false);
-        progressDialog.show();
-    }
-    
-    private void hideProgress() {
-        if (progressDialog != null && progressDialog.isShowing()) {
-            progressDialog.dismiss();
-        }
-    }
-    
-    private void showToast(String message) {
-        Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
-    }
-    
-    private void showError(String error) {
-        new AlertDialog.Builder(this)
-            .setTitle("Error")
-            .setMessage(error)
-            .setPositiveButton("OK", null)
-            .show();
-    }
-    
-    @Override
-    protected void onDestroy() {
-        super.onDestroy();
-        hideProgress();
-    }
-}
-
-
-================================================================================
-
-/storage/emulated/0/AndroidIDEProjects/TerrariaML/main/java/com/modloader/ui/SettingsActivity.java
-
-// File: SettingsActivity.java (Enhanced UI with Operation Modes)
-// Path: /app/src/main/java/com/terrarialoader/ui/SettingsActivity.java
-
-package com.modloader.ui;
-
-import android.Manifest;
-import android.content.Context;
-import android.content.Intent;
-import android.content.SharedPreferences;
-import android.content.pm.PackageManager;
-import android.graphics.Color;
-import android.net.Uri;
-import android.os.Build;
-import android.os.Bundle;
-import android.os.Environment;
-import android.provider.Settings;
-import android.view.View;
-import android.widget.*;
-
-import androidx.annotation.NonNull;
-import androidx.appcompat.app.AlertDialog;
-import androidx.appcompat.app.AppCompatActivity;
-import androidx.cardview.widget.CardView;
-import androidx.core.app.ActivityCompat;
-import androidx.core.content.ContextCompat;
-
-import com.modloader.R;
-import com.modloader.util.LogUtils;
-import com.modloader.util.PermissionManager;
-import com.modloader.util.ShizukuManager;
-import com.modloader.util.RootManager;
-
-public class SettingsActivity extends AppCompatActivity {
-    
-    // Operation Mode Constants
-    public static final String PREF_OPERATION_MODE = "operation_mode";
-    public static final String MODE_NORMAL = "normal";
-    public static final String MODE_SHIZUKU = "shizuku";
-    public static final String MODE_ROOT = "root";
-    public static final String MODE_HYBRID = "hybrid"; // Both Shizuku + Root
-    
-    // UI Components
-    private RadioGroup operationModeGroup;
-    private RadioButton normalModeRadio;
-    private RadioButton shizukuModeRadio;
-    private RadioButton rootModeRadio;
-    private RadioButton hybridModeRadio;
-    
-    private CardView normalCard, shizukuCard, rootCard, hybridCard;
-    private TextView normalStatus, shizukuStatus, rootStatus, hybridStatus;
-    private Button shizukuSetupBtn, rootSetupBtn, permissionBtn;
-    
-    private Switch autoEnableSwitch;
-    private Switch debugLoggingSwitch;
-    private Switch autoBackupSwitch;
-    private Switch autoUpdateSwitch;
-    
-    private SharedPreferences prefs;
-    private PermissionManager permissionManager;
-    private ShizukuManager shizukuManager;
-    private RootManager rootManager;
-    
-    @Override
-    protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_settings_enhanced);
-        setTitle("⚙️ Settings & Operation Modes");
-        
-        LogUtils.logUser("Settings activity opened");
-        
-        // Initialize managers
-        prefs = getSharedPreferences("terraria_loader_settings", MODE_PRIVATE);
-        permissionManager = new PermissionManager(this);
-        shizukuManager = new ShizukuManager(this);
-        rootManager = new RootManager(this);
-        
-        initializeViews();
-        setupOperationModes();
-        setupFeatureToggles();
-        setupActionButtons();
-        updateUIState();
-        
-        // Auto-setup permissions based on current mode
-        autoSetupPermissions();
-    }
-    
-    private void initializeViews() {
-        // Operation Mode Selection
-        operationModeGroup = findViewById(R.id.operationModeGroup);
-        normalModeRadio = findViewById(R.id.normalModeRadio);
-        shizukuModeRadio = findViewById(R.id.shizukuModeRadio);
-        rootModeRadio = findViewById(R.id.rootModeRadio);
-        hybridModeRadio = findViewById(R.id.hybridModeRadio);
-        
-        // Mode Cards
-        normalCard = findViewById(R.id.normalCard);
-        shizukuCard = findViewById(R.id.shizukuCard);
-        rootCard = findViewById(R.id.rootCard);
-        hybridCard = findViewById(R.id.hybridCard);
-        
-        // Status Text
-        normalStatus = findViewById(R.id.normalStatus);
-        shizukuStatus = findViewById(R.id.shizukuStatus);
-        rootStatus = findViewById(R.id.rootStatus);
-        hybridStatus = findViewById(R.id.hybridStatus);
-        
-        // Setup Buttons
-        shizukuSetupBtn = findViewById(R.id.shizukuSetupBtn);
-        rootSetupBtn = findViewById(R.id.rootSetupBtn);
-        permissionBtn = findViewById(R.id.permissionBtn);
-        
-        // Feature Toggles
-        autoEnableSwitch = findViewById(R.id.autoEnableSwitch);
-        debugLoggingSwitch = findViewById(R.id.debugLoggingSwitch);
-        autoBackupSwitch = findViewById(R.id.autoBackupSwitch);
-        autoUpdateSwitch = findViewById(R.id.autoUpdateSwitch);
-    }
-    
-    private void setupOperationModes() {
-        // Load current mode
-        String currentMode = prefs.getString(PREF_OPERATION_MODE, MODE_NORMAL);
-        setOperationMode(currentMode, false);
-        
-        // Set up radio button listeners
-        operationModeGroup.setOnCheckedChangeListener((group, checkedId) -> {
-            String newMode;
-            if (checkedId == R.id.normalModeRadio) {
-                newMode = MODE_NORMAL;
-            } else if (checkedId == R.id.shizukuModeRadio) {
-                newMode = MODE_SHIZUKU;
-            } else if (checkedId == R.id.rootModeRadio) {
-                newMode = MODE_ROOT;
-            } else if (checkedId == R.id.hybridModeRadio) {
-                newMode = MODE_HYBRID;
-            } else {
-                newMode = MODE_NORMAL;
-            }
-            
-            setOperationMode(newMode, true);
-        });
-        
-        // Card click listeners for better UX
-        setupCardListeners();
-    }
-    
-    private void setupCardListeners() {
-        normalCard.setOnClickListener(v -> {
-            normalModeRadio.setChecked(true);
-        });
-        
-        shizukuCard.setOnClickListener(v -> {
-            if (shizukuManager.isShizukuAvailable()) {
-                shizukuModeRadio.setChecked(true);
-            } else {
-                showShizukuSetupDialog();
-            }
-        });
-        
-        rootCard.setOnClickListener(v -> {
-            if (rootManager.isRootAvailable()) {
-                rootModeRadio.setChecked(true);
-            } else {
-                showRootInfoDialog();
-            }
-        });
-        
-        hybridCard.setOnClickListener(v -> {
-            if (shizukuManager.isShizukuAvailable() && rootManager.isRootAvailable()) {
-                hybridModeRadio.setChecked(true);
-            } else {
-                showHybridSetupDialog();
-            }
-        });
-    }
-    
-    private void setOperationMode(String mode, boolean save) {
-        if (save) {
-            prefs.edit().putString(PREF_OPERATION_MODE, mode).apply();
-            LogUtils.logUser("Operation mode changed to: " + mode);
-            
-            // Auto-setup permissions for new mode
-            autoSetupPermissions();
-        }
-        
-        // Update radio buttons
-        switch (mode) {
-            case MODE_NORMAL:
-                normalModeRadio.setChecked(true);
-                break;
-            case MODE_SHIZUKU:
-                shizukuModeRadio.setChecked(true);
-                break;
-            case MODE_ROOT:
-                rootModeRadio.setChecked(true);
-                break;
-            case MODE_HYBRID:
-                hybridModeRadio.setChecked(true);
-                break;
-        }
-        
-        updateUIState();
-    }
-    
-    private void setupFeatureToggles() {
-        // Load current settings
-        autoEnableSwitch.setChecked(prefs.getBoolean("auto_enable_mods", true));
-        debugLoggingSwitch.setChecked(prefs.getBoolean("debug_logging", false));
-        autoBackupSwitch.setChecked(prefs.getBoolean("auto_backup", true));
-        autoUpdateSwitch.setChecked(prefs.getBoolean("auto_update_check", true));
-        
-        // Set up listeners
-        autoEnableSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
-            prefs.edit().putBoolean("auto_enable_mods", isChecked).apply();
-            LogUtils.logUser("Auto-enable mods: " + isChecked);
-        });
-        
-        debugLoggingSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
-            prefs.edit().putBoolean("debug_logging", isChecked).apply();
-            LogUtils.setDebugEnabled(isChecked);
-            LogUtils.logUser("Debug logging: " + isChecked);
-        });
-        
-        autoBackupSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
-            prefs.edit().putBoolean("auto_backup", isChecked).apply();
-            LogUtils.logUser("Auto backup: " + isChecked);
-        });
-        
-        autoUpdateSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
-            prefs.edit().putBoolean("auto_update_check", isChecked).apply();
-            LogUtils.logUser("Auto update check: " + isChecked);
-        });
-    }
-    
-    private void setupActionButtons() {
-        // Shizuku Setup Button
-        shizukuSetupBtn.setOnClickListener(v -> {
-            if (!shizukuManager.isShizukuInstalled()) {
-                showShizukuInstallDialog();
-            } else if (!shizukuManager.isShizukuRunning()) {
-                showShizukuStartDialog();
-            } else if (!shizukuManager.hasShizukuPermission()) {
-                shizukuManager.requestShizukuPermission();
-            } else {
-                Toast.makeText(this, "Shizuku is already properly configured!", Toast.LENGTH_SHORT).show();
-            }
-        });
-        
-        // Root Setup Button
-        rootSetupBtn.setOnClickListener(v -> {
-            if (!rootManager.isRootAvailable()) {
-                showRootInfoDialog();
-            } else {
-                rootManager.requestRootAccess();
-            }
-        });
-        
-        // Permission Management Button
-        permissionBtn.setOnClickListener(v -> {
-            showPermissionManagementDialog();
-        });
-        
-        // Additional action buttons
-        findViewById(R.id.resetSettingsBtn).setOnClickListener(v -> resetToDefaults());
-        findViewById(R.id.exportSettingsBtn).setOnClickListener(v -> exportSettings());
-        findViewById(R.id.importSettingsBtn).setOnClickListener(v -> importSettings());
-    }
-    
-    private void updateUIState() {
-        String currentMode = prefs.getString(PREF_OPERATION_MODE, MODE_NORMAL);
-        
-        // Update card appearances
-        updateCardAppearance(normalCard, normalStatus, MODE_NORMAL.equals(currentMode), 
-                           permissionManager.hasBasicPermissions(), "Standard Android permissions");
-        
-        boolean shizukuReady = shizukuManager.isShizukuReady();
-        updateCardAppearance(shizukuCard, shizukuStatus, MODE_SHIZUKU.equals(currentMode), 
-                           shizukuReady, getShizukuStatusText());
-        
-        boolean rootReady = rootManager.isRootReady();
-        updateCardAppearance(rootCard, rootStatus, MODE_ROOT.equals(currentMode), 
-                           rootReady, getRootStatusText());
-        
-        boolean hybridReady = shizukuReady && rootReady;
-        updateCardAppearance(hybridCard, hybridStatus, MODE_HYBRID.equals(currentMode), 
-                           hybridReady, "Maximum capabilities with both Shizuku and Root");
-        
-        // Update setup button states
-        updateSetupButtons();
-    }
-    
-    private void updateCardAppearance(CardView card, TextView status, boolean selected, 
-                                      boolean available, String statusText) {
-        int cardColor;
-        int textColor = Color.BLACK;
-        
-        if (selected) {
-            cardColor = Color.parseColor("#E8F5E8"); // Light green
-            card.setCardElevation(12f);
-        } else if (available) {
-            cardColor = Color.parseColor("#E3F2FD"); // Light blue
-            card.setCardElevation(6f);
-        } else {
-            cardColor = Color.parseColor("#FFEBEE"); // Light red
-            textColor = Color.parseColor("#666666");
-            card.setCardElevation(2f);
-        }
-        
-        card.setCardBackgroundColor(cardColor);
-        status.setText(statusText);
-        status.setTextColor(textColor);
-    }
-    
-    private void updateSetupButtons() {
-        // Shizuku setup button
-        if (shizukuManager.isShizukuReady()) {
-            shizukuSetupBtn.setText("✅ Shizuku Ready");
-            shizukuSetupBtn.setEnabled(false);
-        } else if (shizukuManager.isShizukuRunning()) {
-            shizukuSetupBtn.setText("🔐 Grant Permission");
-            shizukuSetupBtn.setEnabled(true);
-        } else if (shizukuManager.isShizukuInstalled()) {
-            shizukuSetupBtn.setText("▶️ Start Shizuku");
-            shizukuSetupBtn.setEnabled(true);
-        } else {
-            shizukuSetupBtn.setText("📥 Install Shizuku");
-            shizukuSetupBtn.setEnabled(true);
-        }
-        
-        // Root setup button
-        if (rootManager.isRootReady()) {
-            rootSetupBtn.setText("✅ Root Ready");
-            rootSetupBtn.setEnabled(false);
-        } else if (rootManager.isRootAvailable()) {
-            rootSetupBtn.setText("🔐 Grant Root Access");
-            rootSetupBtn.setEnabled(true);
-        } else {
-            rootSetupBtn.setText("❌ Root Not Available");
-            rootSetupBtn.setEnabled(false);
-        }
-    }
-    
-    private String getShizukuStatusText() {
-        if (!shizukuManager.isShizukuInstalled()) {
-            return "Shizuku app not installed";
-        } else if (!shizukuManager.isShizukuRunning()) {
-            return "Shizuku service not running";
-        } else if (!shizukuManager.hasShizukuPermission()) {
-            return "Shizuku permission not granted";
-        } else {
-            return "✅ Shizuku ready - Enhanced file access";
-        }
-    }
-    
-    private String getRootStatusText() {
-        if (!rootManager.isRootAvailable()) {
-            return "Root access not available on this device";
-        } else if (!rootManager.hasRootPermission()) {
-            return "Root permission not granted";
-        } else {
-            return "✅ Root access ready - Full system control";
-        }
-    }
-    
-    private void autoSetupPermissions() {
-        String mode = prefs.getString(PREF_OPERATION_MODE, MODE_NORMAL);
-        LogUtils.logDebug("Auto-setting up permissions for mode: " + mode);
-        
-        // Request basic permissions for all modes
-        permissionManager.requestBasicPermissions();
-        
-        switch (mode) {
-            case MODE_SHIZUKU:
-                if (shizukuManager.isShizukuRunning() && !shizukuManager.hasShizukuPermission()) {
-                    shizukuManager.requestShizukuPermission();
-                }
-                break;
-            case MODE_ROOT:
-                if (rootManager.isRootAvailable() && !rootManager.hasRootPermission()) {
-                    rootManager.requestRootAccess();
-                }
-                break;
-            case MODE_HYBRID:
-                if (shizukuManager.isShizukuRunning() && !shizukuManager.hasShizukuPermission()) {
-                    shizukuManager.requestShizukuPermission();
-                }
-                if (rootManager.isRootAvailable() && !rootManager.hasRootPermission()) {
-                    rootManager.requestRootAccess();
-                }
-                break;
-        }
-    }
-    
-    // Dialog methods
-    private void showShizukuSetupDialog() {
-        new AlertDialog.Builder(this)
-            .setTitle("Shizuku Setup Required")
-            .setMessage("Shizuku provides enhanced file access without root. Would you like to install it?")
-            .setPositiveButton("Install", (dialog, which) -> shizukuManager.installShizuku())
-            .setNeutralButton("Learn More", (dialog, which) -> openUrl("https://shizuku.rikka.app/"))
-            .setNegativeButton("Cancel", null)
-            .show();
-    }
-    
-    private void showRootInfoDialog() {
-        new AlertDialog.Builder(this)
-            .setTitle("Root Access")
-            .setMessage("Root access provides maximum system control but requires a rooted device. " +
-                       "Root access cannot be installed through this app - your device must already be rooted.")
-            .setPositiveButton("Check Root", (dialog, which) -> rootManager.checkRootStatus())
-            .setNeutralButton("Root Guide", (dialog, which) -> openUrl("https://www.xda-developers.com/root/"))
-            .setNegativeButton("OK", null)
-            .show();
-    }
-    
-    private void showHybridSetupDialog() {
-        String message = "";
-        if (!shizukuManager.isShizukuAvailable()) {
-            message += "• Shizuku is not available\n";
-        }
-        if (!rootManager.isRootAvailable()) {
-            message += "• Root access is not available\n";
-        }
-        
-        new AlertDialog.Builder(this)
-            .setTitle("Hybrid Mode Requirements")
-            .setMessage("Hybrid mode requires both Shizuku and Root access:\n\n" + message + 
-                       "\nPlease set up both components individually first.")
-            .setPositiveButton("OK", null)
-            .show();
-    }
-    
-    private void showShizukuInstallDialog() {
-        new AlertDialog.Builder(this)
-            .setTitle("Install Shizuku")
-            .setMessage("Shizuku needs to be downloaded and installed. This will open your browser.")
-            .setPositiveButton("Download", (dialog, which) -> 
-                openUrl("https://github.com/RikkaApps/Shizuku/releases/latest"))
-            .setNegativeButton("Cancel", null)
-            .show();
-    }
-    
-    private void showShizukuStartDialog() {
-        new AlertDialog.Builder(this)
-            .setTitle("Start Shizuku Service")
-            .setMessage("Shizuku is installed but not running. Please start it using ADB or root, " +
-                       "then return to this app.")
-            .setPositiveButton("Open Shizuku", (dialog, which) -> shizukuManager.openShizukuApp())
-            .setNeutralButton("ADB Guide", (dialog, which) -> 
-                openUrl("https://shizuku.rikka.app/guide/setup/"))
-            .setNegativeButton("Cancel", null)
-            .show();
-    }
-    
-    private void showPermissionManagementDialog() {
-        String[] permissions = {
-            "Storage Access", 
-            "Install Packages", 
-            "Shizuku Access",
-            "Root Access"
-        };
-        
-        boolean[] grantedStatus = {
-            permissionManager.hasStoragePermission(),
-            permissionManager.hasInstallPermission(),
-            shizukuManager.hasShizukuPermission(),
-            rootManager.hasRootPermission()
-        };
-        
-        StringBuilder message = new StringBuilder("Permission Status:\n\n");
-        for (int i = 0; i < permissions.length; i++) {
-            message.append(grantedStatus[i] ? "✅ " : "❌ ")
-                   .append(permissions[i]).append("\n");
-        }
-        
-        new AlertDialog.Builder(this)
-            .setTitle("Permission Management")
-            .setMessage(message.toString())
-            .setPositiveButton("Request Missing", (dialog, which) -> {
-                permissionManager.requestAllPermissions();
-                autoSetupPermissions();
-            })
-            .setNeutralButton("App Settings", (dialog, which) -> openAppSettings())
-            .setNegativeButton("Close", null)
-            .show();
-    }
-    
-    // Utility methods
-    private void openUrl(String url) {
-        try {
-            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
-            startActivity(intent);
-        } catch (Exception e) {
-            Toast.makeText(this, "Could not open browser", Toast.LENGTH_SHORT).show();
-        }
-    }
-    
-    private void openAppSettings() {
-        try {
-            Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
-            intent.setData(Uri.parse("package:" + getPackageName()));
-            startActivity(intent);
-        } catch (Exception e) {
-            Toast.makeText(this, "Could not open app settings", Toast.LENGTH_SHORT).show();
-        }
-    }
-    
-    private void resetToDefaults() {
-        new AlertDialog.Builder(this)
-            .setTitle("Reset Settings")
-            .setMessage("This will reset all settings to their default values. Continue?")
-            .setPositiveButton("Reset", (dialog, which) -> {
-                prefs.edit().clear().apply();
-                recreate(); // Reload activity with default settings
-                Toast.makeText(this, "Settings reset to defaults", Toast.LENGTH_SHORT).show();
-            })
-            .setNegativeButton("Cancel", null)
-            .show();
-    }
-    
-    private void exportSettings() {
-        // Implementation for exporting settings to file
-        Toast.makeText(this, "Export settings - Coming soon", Toast.LENGTH_SHORT).show();
-    }
-    
-    private void importSettings() {
-        // Implementation for importing settings from file
-        Toast.makeText(this, "Import settings - Coming soon", Toast.LENGTH_SHORT).show();
-    }
-    
-    @Override
-    protected void onResume() {
-        super.onResume();
-        updateUIState(); // Refresh UI when returning from other apps
-    }
-    
-    @Override
-    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, 
-                                           @NonNull int[] grantResults) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        permissionManager.handlePermissionResult(requestCode, permissions, grantResults);
-        updateUIState(); // Refresh UI after permission changes
-    }
-    
-    // Static utility methods for other activities
-    public static String getCurrentOperationMode(Context context) {
-        return context.getSharedPreferences("terraria_loader_settings", Context.MODE_PRIVATE)
-                     .getString(PREF_OPERATION_MODE, MODE_NORMAL);
-    }
-    
-    public static boolean isShizukuMode(Context context) {
-        String mode = getCurrentOperationMode(context);
-        return MODE_SHIZUKU.equals(mode) || MODE_HYBRID.equals(mode);
-    }
-    
-    public static boolean isRootMode(Context context) {
-        String mode = getCurrentOperationMode(context);
-        return MODE_ROOT.equals(mode) || MODE_HYBRID.equals(mode);
-    }
-    
-    public static boolean canUseEnhancedPermissions(Context context) {
-        return isShizukuMode(context) || isRootMode(context);
-    }
-    
-    // Legacy compatibility methods for existing code
-    public static boolean isModsEnabled(Context context) {
-        try {
-            return context.getSharedPreferences("terraria_loader_settings", Context.MODE_PRIVATE)
-                         .getBoolean("auto_enable_mods", true);
-        } catch (Exception e) {
-            return true;
-        }
-    }
-    
-    public static boolean isSandboxMode(Context context) {
-        try {
-            return context.getSharedPreferences("terraria_loader_settings", Context.MODE_PRIVATE)
-                         .getBoolean("sandbox_mode", false);
-        } catch (Exception e) {
-            return false;
-        }
-    }
-    
-    public static boolean isDebugMode(Context context) {
-        try {
-            return context.getSharedPreferences("terraria_loader_settings", Context.MODE_PRIVATE)
-                         .getBoolean("debug_logging", false);
-        } catch (Exception e) {
-            return false;
-        }
-    }
-    
-    public static boolean isAutoSaveEnabled(Context context) {
-        try {
-            return context.getSharedPreferences("terraria_loader_settings", Context.MODE_PRIVATE)
-                         .getBoolean("auto_backup", true);
-        } catch (Exception e) {
-            return true;
-        }
-    }
-}
-
-================================================================================
-
-/storage/emulated/0/AndroidIDEProjects/TerrariaML/main/java/com/modloader/ui/SetupGuideActivity.java
-
-// File: SetupGuideActivity.java (Updated) - Added Offline ZIP Import
-// Path: /storage/emulated/0/AndroidIDEProjects/TerrariaML/app/src/main/java/com/terrarialoader/ui/SetupGuideActivity.java
-
-package com.modloader.ui;
-
-import android.app.Activity;
-import android.app.AlertDialog;
-import android.content.Intent;
-import android.net.Uri;
-import android.os.Bundle;
-import android.widget.Button;
-import android.widget.Toast;
-import androidx.appcompat.app.AppCompatActivity;
-
-import com.modloader.R;
-import com.modloader.loader.MelonLoaderManager;
-import com.modloader.util.LogUtils;
-import com.modloader.util.OnlineInstaller;
-import com.modloader.util.OfflineZipImporter;
-
-public class SetupGuideActivity extends AppCompatActivity {
-
-    private static final int REQUEST_SELECT_ZIP = 1001;
-
-    @Override
-    protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_setup_guide);
-
-        setTitle("🚀 MelonLoader Setup Guide");
-
-        setupButtons();
-    }
-
-    private void setupButtons() {
-        Button btnOnlineInstall = findViewById(R.id.btn_online_install);
-        Button btnOfflineImport = findViewById(R.id.btn_offline_import);
-        Button btnManualInstructions = findViewById(R.id.btn_manual_instructions);
-
-        btnOnlineInstall.setOnClickListener(v -> showOnlineInstallDialog());
-        btnOfflineImport.setOnClickListener(v -> showOfflineImportDialog());
-        btnManualInstructions.setOnClickListener(v -> {
-            Intent intent = new Intent(this, InstructionsActivity.class);
-            startActivity(intent);
-        });
-    }
-
-    private void showOnlineInstallDialog() {
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("🌐 Automated Online Installation");
-        builder.setMessage("This will automatically download and install MelonLoader/LemonLoader files from GitHub.\n\n" +
-                          "Requirements:\n" +
-                          "• Active internet connection\n" +
-                          "• ~50MB free space\n\n" +
-                          "Continue with automated installation?");
-        
-        builder.setPositiveButton("Continue", (dialog, which) -> {
-            showLoaderTypeDialog();
-        });
-        
-        builder.setNegativeButton("Cancel", null);
-        builder.show();
-    }
-
-    private void showOfflineImportDialog() {
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("📦 Offline ZIP Import");
-        builder.setMessage("Import a MelonLoader ZIP file that you've already downloaded.\n\n" +
-                          "Supported files:\n" +
-                          "• melon_data.zip (MelonLoader)\n" +
-                          "• lemon_data.zip (LemonLoader)\n" +
-                          "• Custom MelonLoader packages\n\n" +
-                          "The ZIP will be automatically extracted to the correct directories.");
-        
-        builder.setPositiveButton("📂 Select ZIP File", (dialog, which) -> {
-            Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
-            intent.setType("application/zip");
-            intent.addCategory(Intent.CATEGORY_OPENABLE);
-            startActivityForResult(intent, REQUEST_SELECT_ZIP);
-        });
-        
-        builder.setNegativeButton("Cancel", null);
-        builder.show();
-    }
-
-    private void showLoaderTypeDialog() {
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("Choose Loader Type");
-        builder.setMessage("Select which loader to install:\n\n" +
-                          "🔸 MelonLoader:\n" +
-                          "• Full-featured Unity mod loader\n" +
-                          "• Larger file size (~40MB)\n" +
-                          "• Best compatibility\n\n" +
-                          "🔸 LemonLoader:\n" +
-                          "• Lightweight Unity mod loader\n" +
-                          "• Smaller file size (~15MB)\n" +
-                          "• Faster installation\n\n" +
-                          "Which would you like to install?");
-        
-        builder.setPositiveButton("MelonLoader", (dialog, which) -> {
-            LogUtils.logUser("User selected MelonLoader for automated installation");
-            startAutomatedInstallation(MelonLoaderManager.LoaderType.MELONLOADER_NET8);
-        });
-        
-        builder.setNegativeButton("LemonLoader", (dialog, which) -> {
-            LogUtils.logUser("User selected LemonLoader for automated installation");
-            startAutomatedInstallation(MelonLoaderManager.LoaderType.MELONLOADER_NET35);
-        });
-        
-        builder.setNeutralButton("Cancel", null);
-        builder.show();
-    }
-    
-    private void startAutomatedInstallation(MelonLoaderManager.LoaderType loaderType) {
-        LogUtils.logUser("Starting automated " + loaderType.getDisplayName() + " installation...");
-        
-        AlertDialog progressDialog = new AlertDialog.Builder(this)
-            .setTitle("Installing " + loaderType.getDisplayName())
-            .setMessage("Downloading and extracting files from GitHub...\nThis may take a few minutes.")
-            .setCancelable(false)
-            .show();
-
-        new Thread(() -> {
-            boolean success = false;
-            String errorMessage = "";
-
-            try {
-                OnlineInstaller.InstallationResult result = OnlineInstaller.installMelonLoaderOnline(
-                    this, MelonLoaderManager.TERRARIA_PACKAGE, loaderType);
-                success = result.success;
-                errorMessage = result.message;
-                
-            } catch (Exception e) {
-                success = false;
-                errorMessage = e.getMessage();
-                LogUtils.logDebug("Automated installation error: " + errorMessage);
-            }
-
-            final boolean finalSuccess = success;
-            final String finalErrorMessage = errorMessage;
-
-            runOnUiThread(() -> {
-                progressDialog.dismiss();
-                if (finalSuccess) {
-                    showInstallationSuccessDialog(loaderType);
-                } else {
-                    showInstallationErrorDialog(loaderType, finalErrorMessage);
-                }
-            });
-        }).start();
-    }
-
-    private void startOfflineImportProcess(Uri zipUri) {
-        LogUtils.logUser("Starting offline ZIP import process...");
-        
-        AlertDialog progressDialog = new AlertDialog.Builder(this)
-            .setTitle("Importing MelonLoader ZIP")
-            .setMessage("Analyzing and extracting ZIP file...\nThis may take a moment.")
-            .setCancelable(false)
-            .show();
-
-        new Thread(() -> {
-            OfflineZipImporter.ImportResult result = OfflineZipImporter.importMelonLoaderZip(this, zipUri);
-
-            runOnUiThread(() -> {
-                progressDialog.dismiss();
-                if (result.success) {
-                    showImportSuccessDialog(result);
-                } else {
-                    showImportErrorDialog(result);
-                }
-            });
-        }).start();
-    }
-
-    private void showInstallationSuccessDialog(MelonLoaderManager.LoaderType loaderType) {
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("✅ Installation Complete!");
-        builder.setMessage("Great! " + loaderType.getDisplayName() + " has been successfully installed!\n\n" +
-                          "Next steps:\n" +
-                          "1. Go to Unified Loader Activity\n" +
-                          "2. Select your Terraria APK\n" +
-                          "3. Patch APK with loader\n" +
-                          "4. Install patched Terraria\n" +
-                          "5. Add DLL mods and enjoy!\n\n" +
-                          "You can now use DLL mods with Terraria!");
-        
-        builder.setPositiveButton("🚀 Open Unified Loader", (dialog, which) -> {
-            Intent intent = new Intent(this, UnifiedLoaderActivity.class);
-            startActivity(intent);
-            finish();
-        });
-        
-        builder.setNegativeButton("Later", (dialog, which) -> {
-            finish();
-        });
-        
-        builder.show();
-    }
-
-    private void showInstallationErrorDialog(MelonLoaderManager.LoaderType loaderType, String errorMessage) {
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("❌ Installation Failed");
-        builder.setMessage("Failed to install " + loaderType.getDisplayName() + "\n\n" +
-                          "Error: " + (errorMessage.isEmpty() ? "Unknown error occurred" : errorMessage) + "\n\n" +
-                          "Please try:\n" +
-                          "• Check your internet connection\n" +
-                          "• Use Offline ZIP Import instead\n" +
-                          "• Use Manual Installation\n" +
-                          "• Try again later");
-        
-        builder.setPositiveButton("📦 Try Offline Import", (dialog, which) -> {
-            showOfflineImportDialog();
-        });
-        
-        builder.setNegativeButton("📖 Manual Guide", (dialog, which) -> {
-            Intent intent = new Intent(this, InstructionsActivity.class);
-            startActivity(intent);
-        });
-        
-        builder.setNeutralButton("Cancel", null);
-        builder.show();
-    }
-
-    private void showImportSuccessDialog(OfflineZipImporter.ImportResult result) {
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("✅ ZIP Import Complete!");
-        builder.setMessage("Successfully imported " + result.detectedType.getDisplayName() + "!\n\n" +
-                          "Files extracted: " + result.filesExtracted + "\n\n" +
-                          "The loader files have been automatically placed in the correct directories:\n" +
-                          "• NET8/NET35 runtime files\n" +
-                          "• Dependencies and support modules\n" +
-                          "• All required components\n\n" +
-                          "You can now patch APK files!");
-        
-        builder.setPositiveButton("🚀 Open Unified Loader", (dialog, which) -> {
-            Intent intent = new Intent(this, UnifiedLoaderActivity.class);
-            startActivity(intent);
-            finish();
-        });
-        
-        builder.setNegativeButton("✅ Done", (dialog, which) -> {
-            finish();
-        });
-        
-        builder.show();
-    }
-
-    private void showImportErrorDialog(OfflineZipImporter.ImportResult result) {
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("❌ ZIP Import Failed");
-        builder.setMessage("Failed to import ZIP file\n\n" +
-                          "Error: " + result.message + "\n\n" +
-                          (result.errorDetails != null ? "Details: " + result.errorDetails + "\n\n" : "") +
-                          "Please ensure:\n" +
-                          "• ZIP file is a valid MelonLoader package\n" +
-                          "• File is not corrupted\n" +
-                          "• You have sufficient storage space");
-        
-        builder.setPositiveButton("🌐 Try Online Install", (dialog, which) -> {
-            showOnlineInstallDialog();
-        });
-        
-        builder.setNegativeButton("📖 Manual Guide", (dialog, which) -> {
-            Intent intent = new Intent(this, InstructionsActivity.class);
-            startActivity(intent);
-        });
-        
-        builder.setNeutralButton("Try Again", (dialog, which) -> {
-            showOfflineImportDialog();
-        });
-        
-        builder.show();
-    }
-
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-        
-        if (requestCode == REQUEST_SELECT_ZIP && resultCode == Activity.RESULT_OK && data != null) {
-            Uri zipUri = data.getData();
-            if (zipUri != null) {
-                LogUtils.logUser("ZIP file selected for offline import");
-                startOfflineImportProcess(zipUri);
-            }
-        }
-    }
-}
-
-================================================================================
-
-/storage/emulated/0/AndroidIDEProjects/TerrariaML/main/java/com/modloader/ui/UnifiedLoaderActivity.java
-
-// File: UnifiedLoaderActivity.java - Complete Fixed Version
-// Path: /main/java/com/modloader/ui/UnifiedLoaderActivity.java
-
-package com.modloader.ui;
-
-import android.app.Activity;
-import android.app.AlertDialog;
-import android.content.Intent;
-import android.database.Cursor;
-import android.net.Uri;
-import android.os.Bundle;
-import android.provider.OpenableColumns;
-import android.view.View;
-import android.widget.*;
-import android.graphics.Typeface;
-import androidx.appcompat.app.AppCompatActivity;
-
-import com.modloader.R;
-import com.modloader.loader.MelonLoaderManager;
-import com.modloader.util.LogUtils;
-
-/**
- * Unified Loader Activity - Complete wizard-style interface for MelonLoader setup
- */
-public class UnifiedLoaderActivity extends AppCompatActivity implements 
-    UnifiedLoaderController.UnifiedLoaderCallback, UnifiedLoaderListener {
-
-    private static final int REQUEST_SELECT_APK = 1001;
-    private static final int REQUEST_SELECT_ZIP = 1002;
-    
-    // UI Components
-    private ProgressBar stepProgressBar;
-    private TextView stepTitleText;
-    private TextView stepDescriptionText;
-    private TextView stepIndicatorText;
-    private LinearLayout stepContentContainer;
-    private Button previousButton;
-    private Button nextButton;
-    private Button actionButton;
-    
-    // Current step content views
-    private LinearLayout welcomeContent;
-    private LinearLayout loaderInstallContent;
-    private LinearLayout apkSelectionContent;
-    private LinearLayout patchingContent;
-    private LinearLayout completionContent;
-    
-    // Status indicators
-    private TextView loaderStatusText;
-    private TextView apkStatusText;
-    private TextView progressText;
-    private ProgressBar actionProgressBar;
-    
-    // Controller
-    private UnifiedLoaderController controller;
-    private AlertDialog progressDialog;
-
-    @Override
-    protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_unified_loader);
-        
-        setTitle("MelonLoader Setup Wizard");
-        
-        // Initialize controller
-        controller = new UnifiedLoaderController(this);
-        controller.setCallback(this);
-        
-        initializeViews();
-        setupStepContents();
-        setupListeners();
-        
-        // Start wizard
-        controller.setCurrentStep(UnifiedLoaderController.LoaderStep.WELCOME);
-    }
-
-    private void initializeViews() {
-        stepProgressBar = findViewById(R.id.stepProgressBar);
-        stepTitleText = findViewById(R.id.stepTitleText);
-        stepDescriptionText = findViewById(R.id.stepDescriptionText);
-        stepIndicatorText = findViewById(R.id.stepIndicatorText);
-        stepContentContainer = findViewById(R.id.stepContentContainer);
-        previousButton = findViewById(R.id.previousButton);
-        nextButton = findViewById(R.id.nextButton);
-        actionButton = findViewById(R.id.actionButton);
-        
-        loaderStatusText = findViewById(R.id.loaderStatusText);
-        apkStatusText = findViewById(R.id.apkStatusText);
-        progressText = findViewById(R.id.progressText);
-        actionProgressBar = findViewById(R.id.actionProgressBar);
-    }
-
-    private void setupStepContents() {
-        // Create step content views dynamically
-        welcomeContent = createWelcomeContent();
-        loaderInstallContent = createLoaderInstallContent();
-        apkSelectionContent = createApkSelectionContent();
-        patchingContent = createPatchingContent();
-        completionContent = createCompletionContent();
-    }
-
-    private LinearLayout createWelcomeContent() {
-        LinearLayout content = new LinearLayout(this);
-        content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(24, 24, 24, 24);
-        
-        TextView welcomeText = new TextView(this);
-        welcomeText.setText("Welcome to MelonLoader Setup!\n\nThis wizard will guide you through:\n\n• Installing MelonLoader/LemonLoader\n• Patching your Terraria APK\n• Setting up DLL mod support\n\nClick 'Next' to begin!");
-        welcomeText.setTextSize(16);
-        welcomeText.setLineSpacing(8, 1.0f);
-        content.addView(welcomeText);
-        
-        return content;
-    }
-
-    private LinearLayout createLoaderInstallContent() {
-        LinearLayout content = new LinearLayout(this);
-        content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(16, 16, 16, 16);
-        
-        // Loader status
-        TextView statusLabel = new TextView(this);
-        statusLabel.setText("Current Status:");
-        statusLabel.setTextSize(14);
-        statusLabel.setTypeface(null, Typeface.BOLD);
-        content.addView(statusLabel);
-        
-        TextView statusText = new TextView(this);
-        statusText.setText("Checking...");
-        statusText.setTextSize(14);
-        statusText.setPadding(0, 8, 0, 16);
-        content.addView(statusText);
-        
-        // Installation options
-        TextView optionsLabel = new TextView(this);
-        optionsLabel.setText("Installation Options:");
-        optionsLabel.setTextSize(14);
-        optionsLabel.setTypeface(null, Typeface.BOLD);
-        content.addView(optionsLabel);
-        
-        Button onlineInstallBtn = new Button(this);
-        onlineInstallBtn.setText("Online Installation (Recommended)");
-        onlineInstallBtn.setOnClickListener(v -> showOnlineInstallOptions());
-        content.addView(onlineInstallBtn);
-        
-        Button offlineInstallBtn = new Button(this);
-        offlineInstallBtn.setText("Offline ZIP Import");
-        offlineInstallBtn.setOnClickListener(v -> selectOfflineZip());
-        content.addView(offlineInstallBtn);
-        
-        return content;
-    }
-
-    private LinearLayout createApkSelectionContent() {
-        LinearLayout content = new LinearLayout(this);
-        content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(16, 16, 16, 16);
-        
-        TextView instructionText = new TextView(this);
-        instructionText.setText("Select your Terraria APK file to patch with MelonLoader:");
-        instructionText.setTextSize(16);
-        content.addView(instructionText);
-        
-        Button selectApkBtn = new Button(this);
-        selectApkBtn.setText("Select Terraria APK");
-        selectApkBtn.setOnClickListener(v -> selectApkFile());
-        content.addView(selectApkBtn);
-        
-        TextView statusText = new TextView(this);
-        statusText.setText("No APK selected");
-        statusText.setTextSize(14);
-        statusText.setPadding(0, 16, 0, 0);
-        content.addView(statusText);
-        
-        return content;
-    }
-
-    private LinearLayout createPatchingContent() {
-        LinearLayout content = new LinearLayout(this);
-        content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(16, 16, 16, 16);
-        content.setGravity(android.view.Gravity.CENTER);
-        
-        TextView patchingText = new TextView(this);
-        patchingText.setText("Patching APK with MelonLoader...");
-        patchingText.setTextSize(18);
-        patchingText.setGravity(android.view.Gravity.CENTER);
-        content.addView(patchingText);
-        
-        ProgressBar progressBar = new ProgressBar(this);
-        progressBar.setIndeterminate(true);
-        LinearLayout.LayoutParams progressParams = new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        progressParams.topMargin = 24;
-        progressParams.gravity = android.view.Gravity.CENTER;
-        progressBar.setLayoutParams(progressParams);
-        content.addView(progressBar);
-        
-        TextView statusText = new TextView(this);
-        statusText.setText("Initializing...");
-        statusText.setTextSize(14);
-        statusText.setGravity(android.view.Gravity.CENTER);
-        statusText.setPadding(0, 16, 0, 0);
-        content.addView(statusText);
-        
-        return content;
-    }
-
-    private LinearLayout createCompletionContent() {
-        LinearLayout content = new LinearLayout(this);
-        content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(24, 24, 24, 24);
-        
-        TextView completionText = new TextView(this);
-        completionText.setText("Setup Complete!\n\nYour modded Terraria APK is ready!");
-        completionText.setTextSize(18);
-        completionText.setGravity(android.view.Gravity.CENTER);
-        content.addView(completionText);
-        
-        Button installApkBtn = new Button(this);
-        installApkBtn.setText("Install Patched APK");
-        installApkBtn.setOnClickListener(v -> controller.installPatchedApk());
-        content.addView(installApkBtn);
-        
-        Button manageModsBtn = new Button(this);
-        manageModsBtn.setText("Manage DLL Mods");
-        manageModsBtn.setOnClickListener(v -> openModManagement());
-        content.addView(manageModsBtn);
-        
-        Button viewLogsBtn = new Button(this);
-        viewLogsBtn.setText("View Logs");
-        viewLogsBtn.setOnClickListener(v -> startActivity(new Intent(this, LogViewerEnhancedActivity.class)));
-        content.addView(viewLogsBtn);
-        
-        return content;
-    }
-
-    private void setupListeners() {
-        previousButton.setOnClickListener(v -> {
-            if (controller.canProceedToPreviousStep()) {
-                controller.previousStep();
-            }
-        });
-        
-        nextButton.setOnClickListener(v -> {
-            if (controller.canProceedToNextStep()) {
-                handleNextStep();
-            } else {
-                showStepRequirements();
-            }
-        });
-        
-        actionButton.setOnClickListener(v -> handleActionButton());
-    }
-
-    private void handleNextStep() {
-        UnifiedLoaderController.LoaderStep currentStep = controller.getCurrentStep();
-        
-        switch (currentStep) {
-            case WELCOME:
-                controller.nextStep();
-                break;
-            case LOADER_INSTALL:
-                if (controller.isLoaderInstalled()) {
-                    controller.nextStep();
-                } else {
-                    Toast.makeText(this, "Please install a loader first", Toast.LENGTH_SHORT).show();
-                }
-                break;
-            case APK_SELECTION:
-                if (controller.getSelectedApkUri() != null) {
-                    controller.nextStep();
-                    controller.patchApk(); // Auto-start patching
-                } else {
-                    Toast.makeText(this, "Please select an APK first", Toast.LENGTH_SHORT).show();
-                }
-                break;
-            case APK_PATCHING:
-                // Patching in progress, disable navigation
-                break;
-            case COMPLETION:
-                finish(); // Exit wizard
-                break;
-        }
-    }
-
-    private void handleActionButton() {
-        UnifiedLoaderController.LoaderStep currentStep = controller.getCurrentStep();
-        
-        switch (currentStep) {
-            case WELCOME:
-                controller.nextStep();
-                break;
-            case LOADER_INSTALL:
-                showOnlineInstallOptions();
-                break;
-            case APK_SELECTION:
-                selectApkFile();
-                break;
-            case APK_PATCHING:
-                // No action during patching
-                break;
-            case COMPLETION:
-                controller.installPatchedApk();
-                break;
-        }
-    }
-
-    private void showOnlineInstallOptions() {
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("Choose Loader Type");
-        builder.setMessage("Select which loader to install:\n\nMelonLoader: Full-featured, larger size\nLemonLoader: Lightweight, smaller size");
-        
-        builder.setPositiveButton("MelonLoader", (dialog, which) -> {
-            controller.installLoaderOnline(MelonLoaderManager.LoaderType.MELONLOADER_NET8);
-        });
-        
-        builder.setNegativeButton("LemonLoader", (dialog, which) -> {
-            controller.installLoaderOnline(MelonLoaderManager.LoaderType.MELONLOADER_NET35);
-        });
-        
-        builder.setNeutralButton("Cancel", null);
-        builder.show();
-    }
-
-    private void selectOfflineZip() {
-        Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
-        intent.setType("application/zip");
-        intent.addCategory(Intent.CATEGORY_OPENABLE);
-        startActivityForResult(intent, REQUEST_SELECT_ZIP);
-    }
-
-    private void selectApkFile() {
-        Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
-        intent.setType("application/vnd.android.package-archive");
-        intent.addCategory(Intent.CATEGORY_OPENABLE);
-        startActivityForResult(intent, REQUEST_SELECT_APK);
-    }
-
-    private void openModManagement() {
-        Intent intent = new Intent(this, ModManagementActivity.class);
-        startActivity(intent);
-    }
-
-    private void showStepRequirements() {
-        UnifiedLoaderController.LoaderStep currentStep = controller.getCurrentStep();
-        String message = "";
-        
-        switch (currentStep) {
-            case LOADER_INSTALL:
-                message = "Please install MelonLoader or LemonLoader first";
-                break;
-            case APK_SELECTION:
-                message = "Please select a Terraria APK file";
-                break;
-            default:
-                message = "Please complete the current step";
-                break;
-        }
-        
-        Toast.makeText(this, message, Toast.LENGTH_LONG).show();
-    }
-
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-        
-        if (resultCode != Activity.RESULT_OK || data == null || data.getData() == null) {
-            return;
-        }
-        
-        Uri uri = data.getData();
-        
-        switch (requestCode) {
-            case REQUEST_SELECT_APK:
-                controller.selectApk(uri);
-                String filename = getFilenameFromUri(uri);
-                if (apkStatusText != null) {
-                    apkStatusText.setText("Selected: " + filename);
-                }
-                break;
-                
-            case REQUEST_SELECT_ZIP:
-                controller.installLoaderOffline(uri);
-                break;
-        }
-    }
-
-    private String getFilenameFromUri(Uri uri) {
-        String filename = null;
-        try (Cursor cursor = getContentResolver().query(uri, null, null, null, null)) {
-            if (cursor != null && cursor.moveToFirst()) {
-                int nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
-                if (nameIndex >= 0) {
-                    filename = cursor.getString(nameIndex);
-                }
-            }
-        } catch (Exception e) {
-            LogUtils.logDebug("Could not get filename: " + e.getMessage());
-        }
-        return filename != null ? filename : "Unknown file";
-    }
-
-    // === UnifiedLoaderController.UnifiedLoaderCallback Implementation ===
-
-    @Override
-    public void onStepChanged(UnifiedLoaderController.LoaderStep step, String message) {
-        runOnUiThread(() -> {
-            stepTitleText.setText(step.getTitle());
-            stepDescriptionText.setText(message);
-            
-            // Clear previous content
-            stepContentContainer.removeAllViews();
-            
-            // Add appropriate content
-            switch (step) {
-                case WELCOME:
-                    stepContentContainer.addView(welcomeContent);
-                    actionButton.setText("Start Setup");
-                    actionButton.setVisibility(View.VISIBLE);
-                    break;
-                case LOADER_INSTALL:
-                    stepContentContainer.addView(loaderInstallContent);
-                    actionButton.setText("Install Online");
-                    actionButton.setVisibility(View.VISIBLE);
-                    break;
-                case APK_SELECTION:
-                    stepContentContainer.addView(apkSelectionContent);
-                    actionButton.setText("Select APK");
-                    actionButton.setVisibility(View.VISIBLE);
-                    break;
-                case APK_PATCHING:
-                    stepContentContainer.addView(patchingContent);
-                    actionButton.setVisibility(View.GONE);
-                    nextButton.setEnabled(false);
-                    previousButton.setEnabled(false);
-                    break;
-                case COMPLETION:
-                    stepContentContainer.addView(completionContent);
-                    actionButton.setText("Install APK");
-                    actionButton.setVisibility(View.VISIBLE);
-                    nextButton.setText("Finish");
-                    nextButton.setEnabled(true);
-                    previousButton.setEnabled(true);
-                    break;
-            }
-            
-            // Update navigation buttons
-            previousButton.setEnabled(controller.canProceedToPreviousStep());
-            nextButton.setEnabled(controller.canProceedToNextStep());
-        });
-    }
-
-    @Override
-    public void onProgress(String message, int percentage) {
-        runOnUiThread(() -> {
-            if (progressDialog != null) {
-                progressDialog.setMessage(message + (percentage > 0 ? " (" + percentage + "%)" : ""));
-            }
-            if (progressText != null) {
-                progressText.setText(message);
-            }
-        });
-    }
-
-    @Override
-    public void onSuccess(String message) {
-        runOnUiThread(() -> {
-            if (progressDialog != null) {
-                progressDialog.dismiss();
-                progressDialog = null;
-            }
-            Toast.makeText(this, message, Toast.LENGTH_LONG).show();
-        });
-    }
-
-    @Override
-    public void onError(String error) {
-        runOnUiThread(() -> {
-            if (progressDialog != null) {
-                progressDialog.dismiss();
-                progressDialog = null;
-            }
-            
-            AlertDialog.Builder builder = new AlertDialog.Builder(this);
-            builder.setTitle("Error");
-            builder.setMessage(error);
-            builder.setPositiveButton("OK", null);
-            builder.show();
-            
-            // Re-enable navigation
-            nextButton.setEnabled(controller.canProceedToNextStep());
-            previousButton.setEnabled(controller.canProceedToPreviousStep());
-        });
-    }
-
-    @Override
-    public void onLoaderStatusChanged(boolean installed, String statusText) {
-        runOnUiThread(() -> {
-            if (loaderStatusText != null) {
-                loaderStatusText.setText(statusText);
-                loaderStatusText.setTextColor(installed ? 0xFF4CAF50 : 0xFFF44336);
-            }
-        });
-    }
-
-    @Override
-    public void updateStepIndicator(int currentStep, int totalSteps) {
-        runOnUiThread(() -> {
-            stepProgressBar.setMax(totalSteps);
-            stepProgressBar.setProgress(currentStep);
-            stepIndicatorText.setText("Step " + (currentStep + 1) + " of " + (totalSteps + 1));
-        });
-    }
-
-    // === UnifiedLoaderListener Implementation ===
-
-    @Override
-    public void onInstallationStarted(String loaderType) {
-        runOnUiThread(() -> {
-            progressDialog = new AlertDialog.Builder(this)
-                .setTitle("Installing " + loaderType)
-                .setMessage("Starting installation...")
-                .setCancelable(false)
-                .create();
-            progressDialog.show();
-        });
-    }
-
-    @Override
-    public void onInstallationProgress(String message) {
-        runOnUiThread(() -> {
-            if (progressDialog != null) {
-                progressDialog.setMessage(message);
-            }
-        });
-    }
-
-    @Override
-    public void onInstallationSuccess(String loaderType, String outputPath) {
-        runOnUiThread(() -> {
-            if (progressDialog != null) {
-                progressDialog.dismiss();
-                progressDialog = null;
-            }
-            Toast.makeText(this, loaderType + " installed successfully!", Toast.LENGTH_LONG).show();
-        });
-    }
-
-    @Override
-    public void onInstallationFailed(String loaderType, String error) {
-        runOnUiThread(() -> {
-            if (progressDialog != null) {
-                progressDialog.dismiss();
-                progressDialog = null;
-            }
-            
-            AlertDialog.Builder builder = new AlertDialog.Builder(this);
-            builder.setTitle("Installation Failed");
-            builder.setMessage(loaderType + " installation failed:\n\n" + error);
-            builder.setPositiveButton("OK", null);
-            builder.show();
-        });
-    }
-
-    @Override
-    public void onValidationComplete(boolean isValid, String message) {
-        runOnUiThread(() -> {
-            String statusText = isValid ? "Validation passed" : "Validation failed: " + message;
-            Toast.makeText(this, statusText, Toast.LENGTH_SHORT).show();
-        });
-    }
-
-    @Override
-    public void onInstallationStateChanged(UnifiedLoaderController.InstallationState state) {
-        runOnUiThread(() -> {
-            LogUtils.logDebug("Installation state changed to: " + state.getDisplayName());
-        });
-    }
-
-    @Override
-    public void onLogMessage(String message, UnifiedLoaderController.LogLevel level) {
-        // Log messages are already handled by the controller
-        LogUtils.logDebug("Log: [" + level + "] " + message);
-    }
-
-    @Override
-    protected void onResume() {
-        super.onResume();
-        // Refresh loader status when returning to activity
-        if (controller != null) {
-            // Update current step to refresh status
-            controller.setCurrentStep(controller.getCurrentStep());
-        }
-    }
-
-    @Override
-    protected void onDestroy() {
-        super.onDestroy();
-        if (controller != null) {
-            controller.cleanup();
-        }
-        if (progressDialog != null) {
-            progressDialog.dismiss();
-        }
-    }
-}
+--------------------------------------------------------------------------------
