@@ -1,6 +1,4 @@
-
-
-/ModLoader/app/src/main/java/com/modloader/plugin/PluginAPI.java
+/storage/emulated/0/AndroidIDEProjects/ModLoader/ModLoader/app/src/main/java/com/modloader/plugin/PluginAPI.java
 
 // File: PluginAPI.java - API Interface for Plugins to Use (200+ lines)
 // Path: /app/src/main/java/com/modloader/plugin/PluginAPI.java
@@ -25,7 +23,7 @@ import java.io.File;
 import java.util.*;
 
 /**
- * Plugin API Interface - Provides core TerrariaLoader functionality to plugins
+ * Plugin API Interface - Provides core ModLoader functionality to plugins
  * This is the main interface that plugins use to interact with the core application
  */
 public class PluginAPI {
@@ -154,9 +152,9 @@ public class PluginAPI {
     }
     
     /**
-     * Get TerrariaLoader's base directory
+     * Get ModLoader's base directory
      */
-    public File getTerrariaLoaderBaseDir() {
+    public File getModLoaderBaseDir() {
         return PathManager.getGameBaseDir(context, MelonLoaderManager.TERRARIA_PACKAGE);
     }
     
@@ -530,9 +528,9 @@ public class PluginAPI {
     }
     
     /**
-     * Get TerrariaLoader version
+     * Get ModLoader version
      */
-    public String getTerrariaLoaderVersion() {
+    public String getModLoaderVersion() {
         try {
             return context.getPackageManager()
                          .getPackageInfo(context.getPackageName(), 0)
@@ -564,7 +562,7 @@ public class PluginAPI {
         status.append("=== Plugin System Status ===\n");
         status.append("Plugin: ").append(pluginContext.getPlugin().getName()).append("\n");
         status.append("Version: ").append(pluginContext.getPlugin().getVersion()).append("\n");
-        status.append("TerrariaLoader Version: ").append(getTerrariaLoaderVersion()).append("\n");
+        status.append("ModLoader Version: ").append(getModLoaderVersion()).append("\n");
         status.append("Android Version: ").append(getAndroidVersion()).append("\n");
         status.append("Device: ").append(getDeviceInfo()).append("\n");
         status.append("MelonLoader: ").append(isMelonLoaderInstalled() ? "Installed" : "Not Installed").append("\n");
@@ -680,8 +678,7 @@ public class PluginAPI {
     }
 }
 
-
-/ModLoader/app/src/main/java/com/modloader/plugin/PluginContext.java
+/storage/emulated/0/AndroidIDEProjects/ModLoader/ModLoader/app/src/main/java/com/modloader/plugin/PluginContext.java
 
 // File: PluginContext.java - Context and Utilities for Plugins with Hook Management (250+ lines)
 // Path: /app/src/main/java/com/modloader/plugin/PluginContext.java
@@ -1327,8 +1324,7 @@ public class PluginContext {
     }
 }
 
-
-/ModLoader/app/src/main/java/com/modloader/plugin/PluginHook.java
+/storage/emulated/0/AndroidIDEProjects/ModLoader/ModLoader/app/src/main/java/com/modloader/plugin/PluginHook.java
 
 // File: PluginHook.java - Hook System for Core App Integration (150+ lines)
 // Path: /app/src/main/java/com/modloader/plugin/PluginHook.java
@@ -1344,7 +1340,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * Plugin Hook System for Core App Integration
- * Provides hooks into TerrariaLoader's core functionality for plugins
+ * Provides hooks into ModLoader's core functionality for plugins
  */
 public class PluginHook {
     private static final String TAG = "PluginHook";
@@ -1676,8 +1672,7 @@ public class PluginHook {
     }
 }
 
-
-/ModLoader/app/src/main/java/com/modloader/plugin/PluginLoader.java
+/storage/emulated/0/AndroidIDEProjects/ModLoader/ModLoader/app/src/main/java/com/modloader/plugin/PluginLoader.java
 
 // File: PluginLoader.java - Part 1 (Core Loading)
 // Path: /app/src/main/java/com/modloader/plugin/PluginLoader.java
@@ -1697,7 +1692,7 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
 /**
- * Plugin Loading System for TerrariaLoader
+ * Plugin Loading System for ModLoader
  * Handles dynamic loading of plugin files (.jar, .dex, .plugin)
  */
 public class PluginLoader {
@@ -1839,7 +1834,7 @@ public class PluginLoader {
             
             // Set defaults if missing
             if (info.getVersion() == null) info.setVersion("1.0.0");
-            if (info.getDescription() == null) info.setDescription("TerrariaLoader Plugin");
+            if (info.getDescription() == null) info.setDescription("ModLoader Plugin");
             if (info.getAuthor() == null) info.setAuthor("Unknown");
             if (info.getCategory() == null) info.setCategory("General");
             
@@ -1863,7 +1858,7 @@ public class PluginLoader {
         info.setName(baseName);
         info.setId(baseName.toLowerCase().replaceAll("[^a-z0-9_]", "_"));
         info.setVersion("1.0.0");
-        info.setDescription("Android DEX Plugin for TerrariaLoader");
+        info.setDescription("Android DEX Plugin for ModLoader");
         info.setAuthor("Unknown");
         info.setCategory("Android");
         
@@ -1917,7 +1912,7 @@ public class PluginLoader {
         info.setName(baseName);
         info.setId(baseName.toLowerCase().replaceAll("[^a-z0-9_]", "_"));
         info.setVersion("1.0.0");
-        info.setDescription("Generic TerrariaLoader Plugin");
+        info.setDescription("Generic ModLoader Plugin");
         info.setAuthor("Unknown");
         info.setCategory("Generic");
         
@@ -2709,7 +2704,7 @@ public class PluginLoader {
                 template.append("        info.setName(\"").append(pluginName).append("\");\n");
                 template.append("        info.setVersion(\"1.0.0\");\n");
                 template.append("        info.setAuthor(\"Your Name\");\n");
-                template.append("        info.setDescription(\"Example plugin for TerrariaLoader\");\n");
+                template.append("        info.setDescription(\"Example plugin for ModLoader\");\n");
                 template.append("        return info;\n");
                 template.append("    }\n");
                 template.append("    \n");
@@ -2852,8 +2847,7 @@ public class PluginLoader {
     }
 }
 
-
-/ModLoader/app/src/main/java/com/modloader/plugin/PluginManager.java
+/storage/emulated/0/AndroidIDEProjects/ModLoader/ModLoader/app/src/main/java/com/modloader/plugin/PluginManager.java
 
 // File: PluginManager.java - Part 1 (Core Management)
 // Path: /app/src/main/java/com/modloader/plugin/PluginManager.java
@@ -3700,7 +3694,7 @@ public class PluginManager {
             LogUtils.logUser("📤 Exporting plugin list...");
             
             try (java.io.FileWriter writer = new java.io.FileWriter(outputFile)) {
-                writer.write("=== TerrariaLoader Plugin List ===\n");
+                writer.write("=== ModLoader Plugin List ===\n");
                 writer.write("Export Date: " + new java.util.Date().toString() + "\n");
                 writer.write("Total Plugins: " + availablePlugins.size() + "\n");
                 writer.write("Loaded Plugins: " + loadedPlugins.size() + "\n\n");
@@ -3924,7 +3918,7 @@ public class PluginManager {
             LogUtils.logUser("📤 Exporting plugin list...");
             
             try (java.io.FileWriter writer = new java.io.FileWriter(outputFile)) {
-                writer.write("=== TerrariaLoader Plugin List ===\n");
+                writer.write("=== ModLoader Plugin List ===\n");
                 writer.write("Export Date: " + new java.util.Date().toString() + "\n");
                 writer.write("Total Plugins: " + availablePlugins.size() + "\n");
                 writer.write("Loaded Plugins: " + loadedPlugins.size() + "\n\n");
@@ -4145,8 +4139,7 @@ public class PluginManager {
     }
 }
 
-
-/ModLoader/app/src/main/java/com/modloader/plugin/PluginRegistry.java
+/storage/emulated/0/AndroidIDEProjects/ModLoader/ModLoader/app/src/main/java/com/modloader/plugin/PluginRegistry.java
 
 // File: PluginRegistry.java - Plugin Registration and Lifecycle
 // Path: /app/src/main/java/com/modloader/plugin/PluginRegistry.java
@@ -4871,8 +4864,7 @@ public class PluginRegistry {
     }
 }
 
-
-/ModLoader/app/src/main/java/com/modloader/plugin/PluginStorage.java
+/storage/emulated/0/AndroidIDEProjects/ModLoader/ModLoader/app/src/main/java/com/modloader/plugin/PluginStorage.java
 
 // File: PluginStorage.java - Plugin Data Persistence (150+ lines)
 // Path: /app/src/main/java/com/modloader/plugin/PluginStorage.java
@@ -5440,8 +5432,7 @@ public class PluginStorage {
     }
 }
 
-
-/ModLoader/app/src/main/java/com/modloader/plugin/PluginValidator.java
+/storage/emulated/0/AndroidIDEProjects/ModLoader/ModLoader/app/src/main/java/com/modloader/plugin/PluginValidator.java
 
 // File: PluginValidator.java - Plugin Validation and Security System
 // Path: /app/src/main/java/com/modloader/plugin/PluginValidator.java
@@ -5875,7 +5866,7 @@ public class PluginValidator {
      */
     private boolean validateFileHeader(File pluginFile, ValidationResult result) {
         try (FileInputStream fis = new FileInputStream(pluginFile)) {
-            byte[] header = new byte[4);
+            byte[] header = new byte[4];
             if (fis.read(header) != 4) {
                 result.warnings.add("Could not read file header");
                 return true; // Don't fail validation
@@ -6119,8 +6110,7 @@ public class PluginValidator {
 }
 
 
-
-/ModLoader/app/src/main/java/com/modloader/plugin/examples/ExampleModificationPlugin.java
+/storage/emulated/0/AndroidIDEProjects/ModLoader/ModLoader/app/src/main/java/com/modloader/plugin/examples/ExampleModificationPlugin.java
 
 // File: ExampleModificationPlugin.java - Sample Game Modification Plugin
 // Path: /app/src/main/java/com/modloader/plugin/examples/ExampleModificationPlugin.java
@@ -6696,8 +6686,7 @@ public class ExampleModificationPlugin extends Plugin {
     }
 }
 
-
-/ModLoader/app/src/main/java/com/modloader/plugin/examples/ExampleThemePlugin.java
+/storage/emulated/0/AndroidIDEProjects/ModLoader/ModLoader/app/src/main/java/com/modloader/plugin/examples/ExampleThemePlugin.java
 
 // File: ExampleThemePlugin.java - Sample Theme Plugin (150+ lines)
 // Path: /app/src/main/java/com/modloader/plugin/examples/ExampleThemePlugin.java
@@ -6721,7 +6710,7 @@ public class ExampleThemePlugin implements Plugin {
     private static final String PLUGIN_ID = "example_theme_plugin";
     private static final String PLUGIN_NAME = "Example Theme Plugin";
     private static final String VERSION = "1.0.0";
-    private static final String AUTHOR = "TerrariaLoader Team";
+    private static final String AUTHOR = "ModLoader Team";
     private static final String DESCRIPTION = "An example plugin that demonstrates theme customization and UI modifications";
     
     private PluginContext context;
@@ -7112,8 +7101,7 @@ public class ExampleThemePlugin implements Plugin {
     }
 }
 
-
-/ModLoader/app/src/main/java/com/modloader/plugin/examples/ExampleUtilityPlugin.java
+/storage/emulated/0/AndroidIDEProjects/ModLoader/ModLoader/app/src/main/java/com/modloader/plugin/examples/ExampleUtilityPlugin.java
 
 // File: ExampleUtilityPlugin.java - Sample Utility Plugin
 // Path: /app/src/main/java/com/modloader/plugin/examples/ExampleUtilityPlugin.java
@@ -7764,8 +7752,7 @@ public class ExampleUtilityPlugin extends Plugin {
     }
 }
 
-
-/ModLoader/app/src/main/java/com/modloader/ui/BaseActivity.java
+/storage/emulated/0/AndroidIDEProjects/ModLoader/ModLoader/app/src/main/java/com/modloader/ui/BaseActivity.java
 
 // File: BaseActivity.java (FIXED) - Compatible with PermissionManager
 // Path: /app/src/main/java/com/modloader/ui/BaseActivity.java
@@ -8215,11 +8202,10 @@ public abstract class BaseActivity extends AppCompatActivity implements Permissi
     }
 }
 
-
-/ModLoader/app/src/main/java/com/modloader/ui/DllModActivity.java
+/storage/emulated/0/AndroidIDEProjects/ModLoader/ModLoader/app/src/main/java/com/modloader/ui/DllModActivity.java
 
 // File: DllModActivity.java (Updated Activity) - Uses Controller Pattern
-// Path: /storage/emulated/0/AndroidIDEProjects/main/java/com/terrarialoader/ui/DllModActivity.java
+// Path: /storage/emulated/0/AndroidIDEProjects/main/java/com/modloader/ui/DllModActivity.java
 
 package com.modloader.ui;
 
@@ -8518,11 +8504,10 @@ public class DllModActivity extends Activity implements DllModController.DllModC
     }
 }
 
-
-/ModLoader/app/src/main/java/com/modloader/ui/DllModController.java
+/storage/emulated/0/AndroidIDEProjects/ModLoader/ModLoader/app/src/main/java/com/modloader/ui/DllModController.java
 
 // File: DllModController.java (Fixed) - Corrected method calls with Context parameter
-// Path: /storage/emulated/0/AndroidIDEProjects/TerrariaML/app/src/main/java/com/terrarialoader/ui/DllModController.java
+// Path: /storage/emulated/0/AndroidIDEProjects/TerrariaML/app/src/main/java/com/modloader/ui/DllModController.java
 
 package com.modloader.ui;
 
@@ -8881,11 +8866,10 @@ public class DllModController {
     }
 }
 
-
-/ModLoader/app/src/main/java/com/modloader/ui/InstructionsActivity.java
+/storage/emulated/0/AndroidIDEProjects/ModLoader/ModLoader/app/src/main/java/com/modloader/ui/InstructionsActivity.java
 
 // File: InstructionsActivity.java (Fixed) - Corrected method calls with Context parameter
-// Path: /storage/emulated/0/AndroidIDEProjects/TerrariaML/app/src/main/java/com/terrarialoader/ui/InstructionsActivity.java
+// Path: /storage/emulated/0/AndroidIDEProjects/TerrariaML/app/src/main/java/com/modloader/ui/InstructionsActivity.java
 
 package com.modloader.ui;
 
@@ -8948,7 +8932,7 @@ public class InstructionsActivity extends AppCompatActivity {
 
     private void setupInstructions() {
         // Get the actual path that the app uses
-        String actualBasePath = getExternalFilesDir(null) + "/TerrariaLoader/com.and.games505.TerrariaPaid";
+        String actualBasePath = getExternalFilesDir(null) + "/ModLoader/com.and.games505.TerrariaPaid";
         
         String manualInstructions = "📱 Manual MelonLoader/LemonLoader Installation Guide\n\n" +
                 
@@ -8974,7 +8958,7 @@ public class InstructionsActivity extends AppCompatActivity {
                 actualBasePath + "/\n\n" +
                 
                 "Alternative path (if first doesn't work):\n" +
-                "/storage/emulated/0/Android/data/com.modloader/files/TerrariaLoader/com.and.games505.TerrariaPaid/\n\n" +
+                "/storage/emulated/0/Android/data/com.modloader/files/ModLoader/com.and.games505.TerrariaPaid/\n\n" +
                 
                 "Create these folders inside the above path:\n" +
                 "├── Loaders/MelonLoader/\n" +
@@ -9020,7 +9004,7 @@ public class InstructionsActivity extends AppCompatActivity {
                 
                 "✅ STEP 4: Verify Installation\n" +
                 "─────────────────────────────\n" +
-                "Return to TerrariaLoader and:\n" +
+                "Return to ModLoader and:\n" +
                 "1. Go to 'DLL Mod Manager'\n" +
                 "2. Check loader status\n" +
                 "3. Should show '✅ Loader Installed'\n" +
@@ -9068,9 +9052,9 @@ public class InstructionsActivity extends AppCompatActivity {
                 "Your device should use:\n" + actualBasePath + "\n\n" +
                 
                 "If that doesn't work, try:\n" +
-                "/storage/emulated/0/Android/data/com.modloader/files/TerrariaLoader/com.and.games505.TerrariaPaid/\n\n" +
+                "/storage/emulated/0/Android/data/com.modloader/files/ModLoader/com.and.games505.TerrariaPaid/\n\n" +
                 
-                "Need help? Use the menu (⋮) for quick actions or check the logs in TerrariaLoader for detailed error messages!";
+                "Need help? Use the menu (⋮) for quick actions or check the logs in ModLoader for detailed error messages!";
 
         tvInstructions.setText(manualInstructions);
     }
@@ -9154,7 +9138,7 @@ public class InstructionsActivity extends AppCompatActivity {
                               "• Core DLL files are present\n" +
                               "• File permissions are correct\n\n" +
                               "Expected path:\n" +
-                              "/storage/emulated/0/TerrariaLoader/com.and.games505.TerrariaPaid/");
+                              "/storage/emulated/0/ModLoader/com.and.games505.TerrariaPaid/");
             
             builder.setPositiveButton("View Debug Info", (dialog, which) -> {
                 showDebugInfo();
@@ -9184,11 +9168,10 @@ public class InstructionsActivity extends AppCompatActivity {
     }
 }
 
-
-/ModLoader/app/src/main/java/com/modloader/ui/LogCategoryAdapter.java
+/storage/emulated/0/AndroidIDEProjects/ModLoader/ModLoader/app/src/main/java/com/modloader/ui/LogCategoryAdapter.java
 
 // File: LogCategoryAdapter.java - Advanced Log Display Adapter
-// Path: /main/java/com/terrarialoader/ui/LogCategoryAdapter.java
+// Path: /main/java/com/modloader/ui/LogCategoryAdapter.java
 
 package com.modloader.ui;
 
@@ -9591,11 +9574,10 @@ public class LogCategoryAdapter extends RecyclerView.Adapter<LogCategoryAdapter.
     }
 }
 
-
-/ModLoader/app/src/main/java/com/modloader/ui/LogEntry.java
+/storage/emulated/0/AndroidIDEProjects/ModLoader/ModLoader/app/src/main/java/com/modloader/ui/LogEntry.java
 
 // File: LogEntry.java - Enhanced Log Entry Model for Advanced Logging
-// Path: /main/java/com/terrarialoader/ui/LogEntry.java
+// Path: /main/java/com/modloader/ui/LogEntry.java
 
 package com.modloader.ui;
 
@@ -9870,3 +9852,4 @@ public class LogEntry {
         return result;
     }
 }
+
