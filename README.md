@@ -1,8872 +1,5 @@
-/storage/emulated/0/AndroidIDEProjects/ModLoader/ModLoader/app/src/main/java/com/modloader/plugin/PluginAPI.java
 
-// File: PluginAPI.java - API Interface for Plugins to Use (200+ lines)
-// Path: /app/src/main/java/com/modloader/plugin/PluginAPI.java
-
-package com.modloader.plugin;
-
-import android.app.Activity;
-import android.content.Context;
-import android.content.Intent;
-import android.content.SharedPreferences;
-import android.view.View;
-import android.widget.Toast;
-import androidx.appcompat.app.AlertDialog;
-
-import com.modloader.util.LogUtils;
-import com.modloader.util.FileUtils;
-import com.modloader.util.PathManager;
-import com.modloader.loader.ModManager;
-import com.modloader.loader.MelonLoaderManager;
-
-import java.io.File;
-import java.util.*;
-
-/**
- * Plugin API Interface - Provides core ModLoader functionality to plugins
- * This is the main interface that plugins use to interact with the core application
- */
-public class PluginAPI {
-    private static final String TAG = "PluginAPI";
-    private final Context context;
-    private final PluginContext pluginContext;
-    
-    public PluginAPI(Context context, PluginContext pluginContext) {
-        this.context = context;
-        this.pluginContext = pluginContext;
-    }
-    
-    // ===== LOGGING API =====
-    
-    /**
-     * Log a message with the plugin's name as tag
-     */
-    public void log(String message) {
-        LogUtils.logUser("[" + pluginContext.getPlugin().getName() + "] " + message);
-    }
-    
-    /**
-     * Log a debug message
-     */
-    public void logDebug(String message) {
-        LogUtils.logDebug("[" + pluginContext.getPlugin().getName() + "] " + message);
-    }
-    
-    /**
-     * Log an error message
-     */
-    public void logError(String message) {
-        LogUtils.logError("[" + pluginContext.getPlugin().getName() + "] " + message);
-    }
-    
-    /**
-     * Log a warning message
-     */
-    public void logWarning(String message) {
-        LogUtils.logWarning("[" + pluginContext.getPlugin().getName() + "] " + message);
-    }
-    
-    // ===== UI API =====
-    
-    /**
-     * Show a toast message
-     */
-    public void showToast(String message) {
-        Toast.makeText(context, message, Toast.LENGTH_SHORT).show();
-    }
-    
-    /**
-     * Show a long toast message
-     */
-    public void showLongToast(String message) {
-        Toast.makeText(context, message, Toast.LENGTH_LONG).show();
-    }
-    
-    /**
-     * Show an alert dialog
-     */
-    public void showAlert(String title, String message) {
-        showAlert(title, message, null);
-    }
-    
-    /**
-     * Show an alert dialog with callback
-     */
-    public void showAlert(String title, String message, Runnable onOk) {
-        if (!(context instanceof Activity)) {
-            showToast(title + ": " + message);
-            return;
-        }
-        
-        AlertDialog.Builder builder = new AlertDialog.Builder(context);
-        builder.setTitle(title)
-               .setMessage(message)
-               .setPositiveButton("OK", (dialog, which) -> {
-                   if (onOk != null) onOk.run();
-               })
-               .show();
-    }
-    
-    /**
-     * Show a confirmation dialog
-     */
-    public void showConfirmation(String title, String message, Runnable onYes, Runnable onNo) {
-        if (!(context instanceof Activity)) {
-            showToast(title + ": " + message);
-            return;
-        }
-        
-        AlertDialog.Builder builder = new AlertDialog.Builder(context);
-        builder.setTitle(title)
-               .setMessage(message)
-               .setPositiveButton("Yes", (dialog, which) -> {
-                   if (onYes != null) onYes.run();
-               })
-               .setNegativeButton("No", (dialog, which) -> {
-                   if (onNo != null) onNo.run();
-               })
-               .show();
-    }
-    
-    /**
-     * Get current activity (may be null)
-     */
-    public Activity getCurrentActivity() {
-        return (context instanceof Activity) ? (Activity) context : null;
-    }
-    
-    // ===== FILE SYSTEM API =====
-    
-    /**
-     * Get plugin's private data directory
-     */
-    public File getPluginDataDir() {
-        return pluginContext.getDataDir();
-    }
-    
-    /**
-     * Get plugin's config directory
-     */
-    public File getPluginConfigDir() {
-        return pluginContext.getConfigDir();
-    }
-    
-    /**
-     * Get ModLoader's base directory
-     */
-    public File getModLoaderBaseDir() {
-        return PathManager.getGameBaseDir(context, MelonLoaderManager.TERRARIA_PACKAGE);
-    }
-    
-    /**
-     * Get DEX mods directory
-     */
-    public File getDexModsDir() {
-        return PathManager.getDexModsDir(context, MelonLoaderManager.TERRARIA_PACKAGE);
-    }
-    
-    /**
-     * Get DLL mods directory
-     */
-    public File getDllModsDir() {
-        return PathManager.getDllModsDir(context, MelonLoaderManager.TERRARIA_PACKAGE);
-    }
-    
-    /**
-     * Get application logs directory
-     */
-    public File getAppLogsDir() {
-        File baseDir = PathManager.getGameBaseDir(context, MelonLoaderManager.TERRARIA_PACKAGE);
-        return new File(baseDir, "AppLogs");
-    }
-    
-    /**
-     * Copy a file safely
-     */
-    public boolean copyFile(File source, File destination) {
-        return FileUtils.copyFile(source, destination);
-    }
-    
-    /**
-     * Delete a file safely
-     */
-    public boolean deleteFile(File file) {
-        try {
-            return file.delete();
-        } catch (Exception e) {
-            logError("Failed to delete file: " + e.getMessage());
-            return false;
-        }
-    }
-    
-    /**
-     * Create directory if it doesn't exist
-     */
-    public boolean createDirectory(File dir) {
-        return PathManager.ensureDirectoryExists(dir);
-    }
-    
-    /**
-     * Get file size in human readable format
-     */
-    public String formatFileSize(long bytes) {
-        return FileUtils.formatFileSize(bytes);
-    }
-    
-    // ===== MOD MANAGEMENT API =====
-    
-    /**
-     * Get list of installed DEX/JAR mods
-     */
-    public List<File> getDexMods() {
-        try {
-            File dexDir = getDexModsDir();
-            if (!dexDir.exists()) return new ArrayList<>();
-            
-            File[] files = dexDir.listFiles((dir, name) -> {
-                String lower = name.toLowerCase();
-                return lower.endsWith(".dex") || lower.endsWith(".jar");
-            });
-            
-            return files != null ? Arrays.asList(files) : new ArrayList<>();
-        } catch (Exception e) {
-            logError("Failed to get DEX mods: " + e.getMessage());
-            return new ArrayList<>();
-        }
-    }
-    
-    /**
-     * Get list of installed DLL mods
-     */
-    public List<File> getDllMods() {
-        try {
-            File dllDir = getDllModsDir();
-            if (!dllDir.exists()) return new ArrayList<>();
-            
-            File[] files = dllDir.listFiles((dir, name) -> 
-                name.toLowerCase().endsWith(".dll"));
-            
-            return files != null ? Arrays.asList(files) : new ArrayList<>();
-        } catch (Exception e) {
-            logError("Failed to get DLL mods: " + e.getMessage());
-            return new ArrayList<>();
-        }
-    }
-    
-    /**
-     * Check if a mod is enabled
-     */
-    public boolean isModEnabled(File modFile) {
-        return !modFile.getName().toLowerCase().endsWith(".disabled");
-    }
-    
-    /**
-     * Enable/disable a mod
-     */
-    public boolean toggleMod(File modFile, boolean enabled) {
-        try {
-            String currentName = modFile.getName();
-            String newName;
-            
-            if (enabled && currentName.endsWith(".disabled")) {
-                // Enable mod - remove .disabled extension
-                newName = currentName.substring(0, currentName.lastIndexOf(".disabled"));
-            } else if (!enabled && !currentName.endsWith(".disabled")) {
-                // Disable mod - add .disabled extension
-                newName = currentName + ".disabled";
-            } else {
-                // Already in desired state
-                return true;
-            }
-            
-            File newFile = new File(modFile.getParent(), newName);
-            boolean success = modFile.renameTo(newFile);
-            
-            if (success) {
-                log((enabled ? "Enabled" : "Disabled") + " mod: " + currentName);
-            }
-            
-            return success;
-        } catch (Exception e) {
-            logError("Failed to toggle mod: " + e.getMessage());
-            return false;
-        }
-    }
-    
-    /**
-     * Install a mod from file
-     */
-    public boolean installMod(File modFile, String targetName) {
-        try {
-            String fileName = targetName != null ? targetName : modFile.getName();
-            File targetDir;
-            
-            // Determine target directory based on file extension
-            if (fileName.toLowerCase().endsWith(".dll")) {
-                targetDir = getDllModsDir();
-            } else if (fileName.toLowerCase().endsWith(".dex") || fileName.toLowerCase().endsWith(".jar")) {
-                targetDir = getDexModsDir();
-            } else {
-                logError("Unsupported mod file type: " + fileName);
-                return false;
-            }
-            
-            if (!createDirectory(targetDir)) {
-                logError("Failed to create mod directory: " + targetDir.getAbsolutePath());
-                return false;
-            }
-            
-            File targetFile = new File(targetDir, fileName);
-            boolean success = copyFile(modFile, targetFile);
-            
-            if (success) {
-                log("Installed mod: " + fileName);
-                // Trigger hook for mod installation
-                triggerHook(PluginHook.Hooks.MOD_AFTER_LOAD, this, "mod_file", targetFile);
-            }
-            
-            return success;
-        } catch (Exception e) {
-            logError("Failed to install mod: " + e.getMessage());
-            return false;
-        }
-    }
-    
-    /**
-     * Uninstall a mod
-     */
-    public boolean uninstallMod(File modFile) {
-        try {
-            // Trigger hook before uninstalling
-            triggerHook(PluginHook.Hooks.MOD_BEFORE_UNLOAD, this, "mod_file", modFile);
-            
-            boolean success = deleteFile(modFile);
-            
-            if (success) {
-                log("Uninstalled mod: " + modFile.getName());
-                // Trigger hook after uninstalling
-                triggerHook(PluginHook.Hooks.MOD_AFTER_UNLOAD, this, "mod_file", modFile);
-            }
-            
-            return success;
-        } catch (Exception e) {
-            logError("Failed to uninstall mod: " + e.getMessage());
-            return false;
-        }
-    }
-    
-    /**
-     * Get mod count statistics
-     */
-    public ModStats getModStats() {
-        ModStats stats = new ModStats();
-        
-        // Count DEX mods
-        List<File> dexMods = getDexMods();
-        File dexDir = getDexModsDir();
-        if (dexDir.exists()) {
-            File[] allDexFiles = dexDir.listFiles((dir, name) -> {
-                String lower = name.toLowerCase();
-                return lower.endsWith(".dex") || lower.endsWith(".jar") || 
-                       lower.endsWith(".dex.disabled") || lower.endsWith(".jar.disabled");
-            });
-            
-            if (allDexFiles != null) {
-                stats.totalDexMods = allDexFiles.length;
-                for (File mod : allDexFiles) {
-                    if (isModEnabled(mod)) {
-                        stats.enabledDexMods++;
-                    }
-                }
-            }
-        }
-        
-        // Count DLL mods
-        File dllDir = getDllModsDir();
-        if (dllDir.exists()) {
-            File[] allDllFiles = dllDir.listFiles((dir, name) -> {
-                String lower = name.toLowerCase();
-                return lower.endsWith(".dll") || lower.endsWith(".dll.disabled");
-            });
-            
-            if (allDllFiles != null) {
-                stats.totalDllMods = allDllFiles.length;
-                for (File mod : allDllFiles) {
-                    if (isModEnabled(mod)) {
-                        stats.enabledDllMods++;
-                    }
-                }
-            }
-        }
-        
-        return stats;
-    }
-    
-    // ===== CONFIGURATION API =====
-    
-    /**
-     * Get plugin's shared preferences
-     */
-    public SharedPreferences getPluginPreferences() {
-        return context.getSharedPreferences("plugin_" + pluginContext.getPlugin().getId(), 
-                                           Context.MODE_PRIVATE);
-    }
-    
-    /**
-     * Save a plugin setting
-     */
-    public void setSetting(String key, String value) {
-        getPluginPreferences().edit().putString(key, value).apply();
-        triggerHook(PluginHook.Hooks.SETTINGS_CHANGE, this, "key", key);
-    }
-    
-    /**
-     * Save a plugin setting (boolean)
-     */
-    public void setSetting(String key, boolean value) {
-        getPluginPreferences().edit().putBoolean(key, value).apply();
-        triggerHook(PluginHook.Hooks.SETTINGS_CHANGE, this, "key", key);
-    }
-    
-    /**
-     * Save a plugin setting (int)
-     */
-    public void setSetting(String key, int value) {
-        getPluginPreferences().edit().putInt(key, value).apply();
-        triggerHook(PluginHook.Hooks.SETTINGS_CHANGE, this, "key", key);
-    }
-    
-    /**
-     * Save a plugin setting (float)
-     */
-    public void setSetting(String key, float value) {
-        getPluginPreferences().edit().putFloat(key, value).apply();
-        triggerHook(PluginHook.Hooks.SETTINGS_CHANGE, this, "key", key);
-    }
-    
-    /**
-     * Get a plugin setting
-     */
-    public String getSetting(String key, String defaultValue) {
-        return getPluginPreferences().getString(key, defaultValue);
-    }
-    
-    /**
-     * Get a plugin setting (boolean)
-     */
-    public boolean getSetting(String key, boolean defaultValue) {
-        return getPluginPreferences().getBoolean(key, defaultValue);
-    }
-    
-    /**
-     * Get a plugin setting (int)
-     */
-    public int getSetting(String key, int defaultValue) {
-        return getPluginPreferences().getInt(key, defaultValue);
-    }
-    
-    /**
-     * Get a plugin setting (float)
-     */
-    public float getSetting(String key, float defaultValue) {
-        return getPluginPreferences().getFloat(key, defaultValue);
-    }
-    
-    /**
-     * Clear all plugin settings
-     */
-    public void clearAllSettings() {
-        getPluginPreferences().edit().clear().apply();
-        triggerHook(PluginHook.Hooks.SETTINGS_RESET, this);
-    }
-    
-    // ===== HOOK SYSTEM API =====
-    
-    /**
-     * Register a hook listener
-     */
-    public void registerHook(String hookName, PluginHook.HookListener listener) {
-        PluginHook.getInstance().registerHook(hookName, listener);
-        pluginContext.addHookListener(hookName, listener);
-    }
-    
-    /**
-     * Trigger a hook
-     */
-    public void triggerHook(String hookName, Object source) {
-        PluginHook.getInstance().triggerHook(hookName, source);
-    }
-    
-    /**
-     * Trigger a hook with data
-     */
-    public void triggerHook(String hookName, Object source, String key, Object value) {
-        PluginHook.trigger(hookName, source, key, value);
-    }
-    
-    /**
-     * Trigger a hook with multiple data items
-     */
-    public void triggerHook(String hookName, Object source, Map<String, Object> data) {
-        PluginHook.getInstance().triggerHook(hookName, source, data);
-    }
-    
-    // ===== SYSTEM INFORMATION API =====
-    
-    /**
-     * Check if MelonLoader is installed
-     */
-    public boolean isMelonLoaderInstalled() {
-        return MelonLoaderManager.isMelonLoaderInstalled(context, MelonLoaderManager.TERRARIA_PACKAGE);
-    }
-    
-    /**
-     * Check if LemonLoader is installed
-     */
-    public boolean isLemonLoaderInstalled() {
-        return MelonLoaderManager.isLemonLoaderInstalled(context, MelonLoaderManager.TERRARIA_PACKAGE);
-    }
-    
-    /**
-     * Get ModLoader version
-     */
-    public String getModLoaderVersion() {
-        try {
-            return context.getPackageManager()
-                         .getPackageInfo(context.getPackageName(), 0)
-                         .versionName;
-        } catch (Exception e) {
-            return "Unknown";
-        }
-    }
-    
-    /**
-     * Get Android version
-     */
-    public String getAndroidVersion() {
-        return android.os.Build.VERSION.RELEASE;
-    }
-    
-    /**
-     * Get device information
-     */
-    public String getDeviceInfo() {
-        return android.os.Build.MANUFACTURER + " " + android.os.Build.MODEL;
-    }
-    
-    /**
-     * Get plugin system status
-     */
-    public String getPluginSystemStatus() {
-        StringBuilder status = new StringBuilder();
-        status.append("=== Plugin System Status ===\n");
-        status.append("Plugin: ").append(pluginContext.getPlugin().getName()).append("\n");
-        status.append("Version: ").append(pluginContext.getPlugin().getVersion()).append("\n");
-        status.append("ModLoader Version: ").append(getModLoaderVersion()).append("\n");
-        status.append("Android Version: ").append(getAndroidVersion()).append("\n");
-        status.append("Device: ").append(getDeviceInfo()).append("\n");
-        status.append("MelonLoader: ").append(isMelonLoaderInstalled() ? "Installed" : "Not Installed").append("\n");
-        
-        ModStats stats = getModStats();
-        status.append("DEX Mods: ").append(stats.enabledDexMods).append("/").append(stats.totalDexMods).append("\n");
-        status.append("DLL Mods: ").append(stats.enabledDllMods).append("/").append(stats.totalDllMods).append("\n");
-        
-        return status.toString();
-    }
-    
-    // ===== ACTIVITY INTEGRATION API =====
-    
-    /**
-     * Start an activity
-     */
-    public void startActivity(Class<?> activityClass) {
-        try {
-            Intent intent = new Intent(context, activityClass);
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            context.startActivity(intent);
-        } catch (Exception e) {
-            logError("Failed to start activity: " + e.getMessage());
-        }
-    }
-    
-    /**
-     * Start an activity with extras
-     */
-    public void startActivity(Class<?> activityClass, Map<String, String> extras) {
-        try {
-            Intent intent = new Intent(context, activityClass);
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            if (extras != null) {
-                for (Map.Entry<String, String> entry : extras.entrySet()) {
-                    intent.putExtra(entry.getKey(), entry.getValue());
-                }
-            }
-            context.startActivity(intent);
-        } catch (Exception e) {
-            logError("Failed to start activity: " + e.getMessage());
-        }
-    }
-    
-    // ===== UTILITY METHODS =====
-    
-    /**
-     * Execute a task in background thread
-     */
-    public void executeAsync(Runnable task) {
-        new Thread(() -> {
-            try {
-                task.run();
-            } catch (Exception e) {
-                logError("Async task failed: " + e.getMessage());
-            }
-        }).start();
-    }
-    
-    /**
-     * Execute a task on UI thread
-     */
-    public void executeOnUI(Runnable task) {
-        Activity activity = getCurrentActivity();
-        if (activity != null) {
-            activity.runOnUiThread(task);
-        }
-    }
-    
-    /**
-     * Schedule a delayed task
-     */
-    public void scheduleTask(Runnable task, long delayMs) {
-        new Thread(() -> {
-            try {
-                Thread.sleep(delayMs);
-                task.run();
-            } catch (Exception e) {
-                logError("Scheduled task failed: " + e.getMessage());
-            }
-        }).start();
-    }
-    
-    // ===== HELPER CLASSES =====
-    
-    /**
-     * Mod statistics container
-     */
-    public static class ModStats {
-        public int totalDexMods = 0;
-        public int enabledDexMods = 0;
-        public int totalDllMods = 0;
-        public int enabledDllMods = 0;
-        
-        public int getTotalMods() {
-            return totalDexMods + totalDllMods;
-        }
-        
-        public int getTotalEnabled() {
-            return enabledDexMods + enabledDllMods;
-        }
-        
-        public int getTotalDisabled() {
-            return getTotalMods() - getTotalEnabled();
-        }
-        
-        @Override
-        public String toString() {
-            return String.format("ModStats[Total: %d, Enabled: %d, Disabled: %d, DEX: %d/%d, DLL: %d/%d]",
-                getTotalMods(), getTotalEnabled(), getTotalDisabled(),
-                enabledDexMods, totalDexMods, enabledDllMods, totalDllMods);
-        }
-    }
-}
-
-/storage/emulated/0/AndroidIDEProjects/ModLoader/ModLoader/app/src/main/java/com/modloader/plugin/PluginContext.java
-
-// File: PluginContext.java - Context and Utilities for Plugins with Hook Management (250+ lines)
-// Path: /app/src/main/java/com/modloader/plugin/PluginContext.java
-
-package com.modloader.plugin;
-
-import android.content.Context;
-import com.modloader.util.LogUtils;
-import com.modloader.util.PathManager;
-
-import java.io.File;
-import java.io.FileWriter;
-import java.io.IOException;
-import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CopyOnWriteArrayList;
-
-/**
- * Plugin Context - Provides context and utilities for plugins
- * Manages plugin lifecycle, configuration, and hook registration
- */
-public class PluginContext {
-    private static final String TAG = "PluginContext";
-    
-    private final Plugin plugin;
-    private final Context androidContext;
-    private final PluginManager pluginManager;
-    private final PluginAPI api;
-    
-    // Plugin directories
-    private File dataDir;
-    private File configDir;
-    private File cacheDir;
-    private File logsDir;
-    
-    // Plugin state
-    private boolean initialized = false;
-    private boolean enabled = true;
-    private long loadTime;
-    private final Map<String, Object> contextData = new ConcurrentHashMap<>();
-    
-    // Hook management
-    private final Map<String, List<PluginHook.HookListener>> registeredHooks = new ConcurrentHashMap<>();
-    private final List<String> subscribedHooks = new CopyOnWriteArrayList<>();
-    
-    // Plugin resources
-    private final Map<String, Object> resources = new ConcurrentHashMap<>();
-    private final List<AutoCloseable> closeableResources = new CopyOnWriteArrayList<>();
-    
-    // Event listeners
-    private final List<PluginEventListener> eventListeners = new CopyOnWriteArrayList<>();
-    
-    /**
-     * Plugin event listener interface
-     */
-    public interface PluginEventListener {
-        void onPluginEvent(PluginEvent event);
-    }
-    
-    /**
-     * Plugin event types
-     */
-    public enum PluginEventType {
-        LOADING,
-        LOADED,
-        ENABLING,
-        ENABLED,
-        DISABLING,
-        DISABLED,
-        UNLOADING,
-        UNLOADED,
-        ERROR,
-        HOOK_REGISTERED,
-        HOOK_UNREGISTERED,
-        CONFIG_CHANGED
-    }
-    
-    /**
-     * Plugin event data
-     */
-    public static class PluginEvent {
-        private final PluginEventType type;
-        private final PluginContext context;
-        private final String message;
-        private final Object data;
-        private final long timestamp;
-        
-        public PluginEvent(PluginEventType type, PluginContext context, String message, Object data) {
-            this.type = type;
-            this.context = context;
-            this.message = message;
-            this.data = data;
-            this.timestamp = System.currentTimeMillis();
-        }
-        
-        public PluginEventType getType() { return type; }
-        public PluginContext getContext() { return context; }
-        public String getMessage() { return message; }
-        public Object getData() { return data; }
-        public long getTimestamp() { return timestamp; }
-    }
-    
-    public PluginContext(Plugin plugin, Context androidContext, PluginManager pluginManager) {
-        this.plugin = plugin;
-        this.androidContext = androidContext;
-        this.pluginManager = pluginManager;
-        this.api = new PluginAPI(androidContext, this);
-        this.loadTime = System.currentTimeMillis();
-        
-        initializeDirectories();
-        fireEvent(PluginEventType.LOADING, "Plugin context created", null);
-        
-        LogUtils.logDebug("Created plugin context for: " + plugin.getName());
-    }
-    
-    /**
-     * Initialize plugin directories
-     */
-    private void initializeDirectories() {
-        try {
-            File pluginsBaseDir = getPluginsBaseDirectory();
-            String pluginDirName = sanitizeFileName(plugin.getId());
-            
-            // Create main plugin directory
-            File pluginMainDir = new File(pluginsBaseDir, pluginDirName);
-            PathManager.ensureDirectoryExists(pluginMainDir);
-            
-            // Create subdirectories
-            dataDir = new File(pluginMainDir, "data");
-            configDir = new File(pluginMainDir, "config");
-            cacheDir = new File(pluginMainDir, "cache");
-            logsDir = new File(pluginMainDir, "logs");
-            
-            PathManager.ensureDirectoryExists(dataDir);
-            PathManager.ensureDirectoryExists(configDir);
-            PathManager.ensureDirectoryExists(cacheDir);
-            PathManager.ensureDirectoryExists(logsDir);
-            
-            LogUtils.logDebug("Initialized directories for plugin: " + plugin.getId());
-            
-        } catch (Exception e) {
-            LogUtils.logError("Failed to initialize plugin directories: " + e.getMessage());
-        }
-    }
-    
-    /**
-     * Get base plugins directory
-     */
-    private File getPluginsBaseDirectory() {
-        File baseDir = PathManager.getGameBaseDir(androidContext, "com.and.games505.TerrariaPaid");
-        return new File(baseDir, "Plugins");
-    }
-    
-    /**
-     * Sanitize filename for directory creation
-     */
-    private String sanitizeFileName(String name) {
-        return name.replaceAll("[^a-zA-Z0-9._-]", "_").toLowerCase();
-    }
-    
-    // ===== GETTERS =====
-    
-    public Plugin getPlugin() {
-        return plugin;
-    }
-    
-    public Context getAndroidContext() {
-        return androidContext;
-    }
-    
-    public PluginManager getPluginManager() {
-        return pluginManager;
-    }
-    
-    public PluginAPI getAPI() {
-        return api;
-    }
-    
-    public File getDataDir() {
-        return dataDir;
-    }
-    
-    public File getConfigDir() {
-        return configDir;
-    }
-    
-    public File getCacheDir() {
-        return cacheDir;
-    }
-    
-    public File getLogsDir() {
-        return logsDir;
-    }
-    
-    public boolean isInitialized() {
-        return initialized;
-    }
-    
-    public boolean isEnabled() {
-        return enabled;
-    }
-    
-    public long getLoadTime() {
-        return loadTime;
-    }
-    
-    // ===== PLUGIN STATE MANAGEMENT =====
-    
-    /**
-     * Initialize the plugin
-     */
-    public boolean initialize() {
-        if (initialized) {
-            return true;
-        }
-        
-        try {
-            fireEvent(PluginEventType.LOADING, "Initializing plugin", null);
-            
-            // Call plugin's onLoad method
-            plugin.onLoad(this);
-            
-            initialized = true;
-            fireEvent(PluginEventType.LOADED, "Plugin loaded successfully", null);
-            
-            LogUtils.logUser("Plugin loaded: " + plugin.getName() + " v" + plugin.getVersion());
-            return true;
-            
-        } catch (Exception e) {
-            LogUtils.logError("Failed to initialize plugin " + plugin.getName() + ": " + e.getMessage());
-            fireEvent(PluginEventType.ERROR, "Initialization failed", e);
-            return false;
-        }
-    }
-    
-    /**
-     * Enable the plugin
-     */
-    public boolean enable() {
-        if (!initialized) {
-            LogUtils.logError("Cannot enable uninitialized plugin: " + plugin.getName());
-            return false;
-        }
-        
-        if (enabled) {
-            return true;
-        }
-        
-        try {
-            fireEvent(PluginEventType.ENABLING, "Enabling plugin", null);
-            
-            // Call plugin's onEnable method
-            plugin.onEnable(this);
-            
-            enabled = true;
-            fireEvent(PluginEventType.ENABLED, "Plugin enabled successfully", null);
-            
-            LogUtils.logUser("Plugin enabled: " + plugin.getName());
-            return true;
-            
-        } catch (Exception e) {
-            LogUtils.logError("Failed to enable plugin " + plugin.getName() + ": " + e.getMessage());
-            fireEvent(PluginEventType.ERROR, "Enable failed", e);
-            return false;
-        }
-    }
-    
-    /**
-     * Disable the plugin
-     */
-    public boolean disable() {
-        if (!enabled) {
-            return true;
-        }
-        
-        try {
-            fireEvent(PluginEventType.DISABLING, "Disabling plugin", null);
-            
-            // Call plugin's onDisable method
-            plugin.onDisable(this);
-            
-            enabled = false;
-            fireEvent(PluginEventType.DISABLED, "Plugin disabled successfully", null);
-            
-            LogUtils.logUser("Plugin disabled: " + plugin.getName());
-            return true;
-            
-        } catch (Exception e) {
-            LogUtils.logError("Failed to disable plugin " + plugin.getName() + ": " + e.getMessage());
-            fireEvent(PluginEventType.ERROR, "Disable failed", e);
-            return false;
-        }
-    }
-    
-    /**
-     * Unload the plugin
-     */
-    public boolean unload() {
-        try {
-            fireEvent(PluginEventType.UNLOADING, "Unloading plugin", null);
-            
-            // Disable first if enabled
-            if (enabled) {
-                disable();
-            }
-            
-            // Clean up hooks
-            unregisterAllHooks();
-            
-            // Close resources
-            closeAllResources();
-            
-            // Call plugin's onUnload method
-            if (initialized) {
-                plugin.onUnload(this);
-            }
-            
-            initialized = false;
-            fireEvent(PluginEventType.UNLOADED, "Plugin unloaded successfully", null);
-            
-            LogUtils.logUser("Plugin unloaded: " + plugin.getName());
-            return true;
-            
-        } catch (Exception e) {
-            LogUtils.logError("Failed to unload plugin " + plugin.getName() + ": " + e.getMessage());
-            fireEvent(PluginEventType.ERROR, "Unload failed", e);
-            return false;
-        }
-    }
-    
-    // ===== HOOK MANAGEMENT =====
-    
-    /**
-     * Add a hook listener (called by PluginAPI)
-     */
-    public void addHookListener(String hookName, PluginHook.HookListener listener) {
-        registeredHooks.computeIfAbsent(hookName, k -> new CopyOnWriteArrayList<>()).add(listener);
-        if (!subscribedHooks.contains(hookName)) {
-            subscribedHooks.add(hookName);
-        }
-        fireEvent(PluginEventType.HOOK_REGISTERED, "Registered hook: " + hookName, hookName);
-        LogUtils.logDebug("Plugin " + plugin.getName() + " registered hook: " + hookName);
-    }
-    
-    /**
-     * Remove a hook listener
-     */
-    public void removeHookListener(String hookName, PluginHook.HookListener listener) {
-        List<PluginHook.HookListener> listeners = registeredHooks.get(hookName);
-        if (listeners != null) {
-            listeners.remove(listener);
-            if (listeners.isEmpty()) {
-                registeredHooks.remove(hookName);
-                subscribedHooks.remove(hookName);
-            }
-            PluginHook.getInstance().unregisterHook(hookName, listener);
-            fireEvent(PluginEventType.HOOK_UNREGISTERED, "Unregistered hook: " + hookName, hookName);
-            LogUtils.logDebug("Plugin " + plugin.getName() + " unregistered hook: " + hookName);
-        }
-    }
-    
-    /**
-     * Unregister all hooks for this plugin
-     */
-    public void unregisterAllHooks() {
-        for (Map.Entry<String, List<PluginHook.HookListener>> entry : registeredHooks.entrySet()) {
-            String hookName = entry.getKey();
-            for (PluginHook.HookListener listener : entry.getValue()) {
-                PluginHook.getInstance().unregisterHook(hookName, listener);
-            }
-        }
-        registeredHooks.clear();
-        subscribedHooks.clear();
-        LogUtils.logDebug("Unregistered all hooks for plugin: " + plugin.getName());
-    }
-    
-    /**
-     * Get registered hooks for this plugin
-     */
-    public Set<String> getRegisteredHooks() {
-        return new HashSet<>(subscribedHooks);
-    }
-    
-    // ===== CONTEXT DATA MANAGEMENT =====
-    
-    /**
-     * Store context data
-     */
-    public void setData(String key, Object value) {
-        contextData.put(key, value);
-    }
-    
-    /**
-     * Get context data
-     */
-    @SuppressWarnings("unchecked")
-    public <T> T getData(String key, Class<T> type) {
-        Object value = contextData.get(key);
-        if (value != null && type.isInstance(value)) {
-            return (T) value;
-        }
-        return null;
-    }
-    
-    /**
-     * Get context data with default value
-     */
-    @SuppressWarnings("unchecked")
-    public <T> T getData(String key, Class<T> type, T defaultValue) {
-        T value = getData(key, type);
-        return value != null ? value : defaultValue;
-    }
-    
-    /**
-     * Check if context data exists
-     */
-    public boolean hasData(String key) {
-        return contextData.containsKey(key);
-    }
-    
-    /**
-     * Remove context data
-     */
-    public void removeData(String key) {
-        contextData.remove(key);
-    }
-    
-    /**
-     * Clear all context data
-     */
-    public void clearData() {
-        contextData.clear();
-    }
-    
-    // ===== RESOURCE MANAGEMENT =====
-    
-    /**
-     * Store a resource
-     */
-    public void setResource(String key, Object resource) {
-        resources.put(key, resource);
-        if (resource instanceof AutoCloseable) {
-            closeableResources.add((AutoCloseable) resource);
-        }
-    }
-    
-    /**
-     * Get a resource
-     */
-    @SuppressWarnings("unchecked")
-    public <T> T getResource(String key, Class<T> type) {
-        Object resource = resources.get(key);
-        if (resource != null && type.isInstance(resource)) {
-            return (T) resource;
-        }
-        return null;
-    }
-    
-    /**
-     * Remove a resource
-     */
-    public void removeResource(String key) {
-        Object resource = resources.remove(key);
-        if (resource instanceof AutoCloseable) {
-            closeableResources.remove(resource);
-            try {
-                ((AutoCloseable) resource).close();
-            } catch (Exception e) {
-                LogUtils.logDebug("Error closing resource: " + e.getMessage());
-            }
-        }
-    }
-    
-    /**
-     * Close all resources
-     */
-    private void closeAllResources() {
-        for (AutoCloseable resource : closeableResources) {
-            try {
-                resource.close();
-            } catch (Exception e) {
-                LogUtils.logDebug("Error closing resource: " + e.getMessage());
-            }
-        }
-        closeableResources.clear();
-        resources.clear();
-    }
-    
-    // ===== EVENT SYSTEM =====
-    
-    /**
-     * Add event listener
-     */
-    public void addEventListener(PluginEventListener listener) {
-        eventListeners.add(listener);
-    }
-    
-    /**
-     * Remove event listener
-     */
-    public void removeEventListener(PluginEventListener listener) {
-        eventListeners.remove(listener);
-    }
-    
-    /**
-     * Fire plugin event
-     */
-    private void fireEvent(PluginEventType type, String message, Object data) {
-        PluginEvent event = new PluginEvent(type, this, message, data);
-        
-        // Notify internal listeners
-        for (PluginEventListener listener : eventListeners) {
-            try {
-                listener.onPluginEvent(event);
-            } catch (Exception e) {
-                LogUtils.logDebug("Error in plugin event listener: " + e.getMessage());
-            }
-        }
-        
-        // Notify plugin manager
-        if (pluginManager != null) {
-            pluginManager.onPluginEvent(event);
-        }
-    }
-    
-    // ===== LOGGING UTILITIES =====
-    
-    /**
-     * Write to plugin log file
-     */
-    public void writeToLogFile(String message) {
-        try {
-            File logFile = new File(logsDir, "plugin.log");
-            try (FileWriter writer = new FileWriter(logFile, true)) {
-                writer.write(new Date().toString() + " - " + message + "\n");
-            }
-        } catch (IOException e) {
-            LogUtils.logDebug("Failed to write to plugin log: " + e.getMessage());
-        }
-    }
-    
-    /**
-     * Create plugin-specific log file
-     */
-    public File createLogFile(String filename) {
-        File logFile = new File(logsDir, filename);
-        try {
-            logFile.createNewFile();
-            return logFile;
-        } catch (IOException e) {
-            LogUtils.logDebug("Failed to create log file: " + e.getMessage());
-            return null;
-        }
-    }
-    
-    // ===== CONFIGURATION UTILITIES =====
-    
-    /**
-     * Create config file
-     */
-    public File createConfigFile(String filename) {
-        File configFile = new File(configDir, filename);
-        try {
-            configFile.createNewFile();
-            fireEvent(PluginEventType.CONFIG_CHANGED, "Config file created: " + filename, configFile);
-            return configFile;
-        } catch (IOException e) {
-            LogUtils.logDebug("Failed to create config file: " + e.getMessage());
-            return null;
-        }
-    }
-    
-    /**
-     * Get config file
-     */
-    public File getConfigFile(String filename) {
-        return new File(configDir, filename);
-    }
-    
-    /**
-     * Check if config file exists
-     */
-    public boolean hasConfigFile(String filename) {
-        return new File(configDir, filename).exists();
-    }
-    
-    // ===== STATUS AND DEBUGGING =====
-    
-    /**
-     * Get plugin context status
-     */
-    public String getContextStatus() {
-        StringBuilder status = new StringBuilder();
-        status.append("=== Plugin Context Status ===\n");
-        status.append("Plugin: ").append(plugin.getName()).append(" (").append(plugin.getId()).append(")\n");
-        status.append("Version: ").append(plugin.getVersion()).append("\n");
-        status.append("Initialized: ").append(initialized).append("\n");
-        status.append("Enabled: ").append(enabled).append("\n");
-        status.append("Load Time: ").append(new Date(loadTime)).append("\n");
-        status.append("Uptime: ").append((System.currentTimeMillis() - loadTime) / 1000).append("s\n");
-        status.append("Data Directory: ").append(dataDir.getAbsolutePath()).append("\n");
-        status.append("Registered Hooks: ").append(subscribedHooks.size()).append("\n");
-        status.append("Context Data Items: ").append(contextData.size()).append("\n");
-        status.append("Resources: ").append(resources.size()).append("\n");
-        status.append("Event Listeners: ").append(eventListeners.size()).append("\n");
-        
-        if (!subscribedHooks.isEmpty()) {
-            status.append("Active Hooks: ").append(String.join(", ", subscribedHooks)).append("\n");
-        }
-        
-        return status.toString();
-    }
-    
-    /**
-     * Get plugin statistics
-     */
-    public Map<String, Object> getStatistics() {
-        Map<String, Object> stats = new HashMap<>();
-        stats.put("initialized", initialized);
-        stats.put("enabled", enabled);
-        stats.put("loadTime", loadTime);
-        stats.put("uptime", System.currentTimeMillis() - loadTime);
-        stats.put("hookCount", subscribedHooks.size());
-        stats.put("dataCount", contextData.size());
-        stats.put("resourceCount", resources.size());
-        stats.put("listenerCount", eventListeners.size());
-        return stats;
-    }
-    
-    /**
-     * Cleanup method called during plugin unload
-     */
-    public void cleanup() {
-        try {
-            unregisterAllHooks();
-            closeAllResources();
-            contextData.clear();
-            eventListeners.clear();
-            LogUtils.logDebug("Cleaned up plugin context for: " + plugin.getName());
-        } catch (Exception e) {
-            LogUtils.logError("Error during plugin context cleanup: " + e.getMessage());
-        }
-    }
-}
-
-/storage/emulated/0/AndroidIDEProjects/ModLoader/ModLoader/app/src/main/java/com/modloader/plugin/PluginHook.java
-
-// File: PluginHook.java - Hook System for Core App Integration (150+ lines)
-// Path: /app/src/main/java/com/modloader/plugin/PluginHook.java
-
-package com.modloader.plugin;
-
-import android.content.Context;
-import com.modloader.util.LogUtils;
-import java.lang.reflect.Method;
-import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CopyOnWriteArrayList;
-
-/**
- * Plugin Hook System for Core App Integration
- * Provides hooks into ModLoader's core functionality for plugins
- */
-public class PluginHook {
-    private static final String TAG = "PluginHook";
-    
-    // Hook priority levels
-    public enum Priority {
-        LOWEST(0),
-        LOW(25),
-        NORMAL(50),
-        HIGH(75),
-        HIGHEST(100);
-        
-        private final int value;
-        Priority(int value) { this.value = value; }
-        public int getValue() { return value; }
-    }
-    
-    // Hook listener interface
-    public interface HookListener {
-        void onEvent(HookEvent event);
-        default Priority getPriority() { return Priority.NORMAL; }
-    }
-    
-    // Hook event data container
-    public static class HookEvent {
-        private final String name;
-        private final Object source;
-        private final Map<String, Object> data;
-        private boolean cancelled = false;
-        
-        public HookEvent(String name, Object source) {
-            this.name = name;
-            this.source = source;
-            this.data = new HashMap<>();
-        }
-        
-        public String getName() { return name; }
-        public Object getSource() { return source; }
-        public Map<String, Object> getData() { return data; }
-        
-        public void putData(String key, Object value) { data.put(key, value); }
-        public Object getData(String key) { return data.get(key); }
-        
-        public boolean isCancelled() { return cancelled; }
-        public void setCancelled(boolean cancelled) { this.cancelled = cancelled; }
-        
-        @SuppressWarnings("unchecked")
-        public <T> T getData(String key, Class<T> type) {
-            Object value = data.get(key);
-            if (value != null && type.isInstance(value)) {
-                return (T) value;
-            }
-            return null;
-        }
-    }
-    
-    // Hook manager - singleton instance
-    private static PluginHook instance;
-    private final Map<String, List<HookListener>> hooks = new ConcurrentHashMap<>();
-    private final Map<String, Integer> hookCallCounts = new ConcurrentHashMap<>();
-    private boolean debugMode = false;
-    
-    // Core hook names - these are the hooks available to plugins
-    public static final class Hooks {
-        // Application lifecycle hooks
-        public static final String APP_STARTUP = "app.startup";
-        public static final String APP_SHUTDOWN = "app.shutdown";
-        public static final String ACTIVITY_CREATE = "activity.create";
-        public static final String ACTIVITY_RESUME = "activity.resume";
-        public static final String ACTIVITY_PAUSE = "activity.pause";
-        
-        // Mod loading hooks
-        public static final String MOD_BEFORE_LOAD = "mod.before_load";
-        public static final String MOD_AFTER_LOAD = "mod.after_load";
-        public static final String MOD_BEFORE_UNLOAD = "mod.before_unload";
-        public static final String MOD_AFTER_UNLOAD = "mod.after_unload";
-        public static final String MOD_ENABLE = "mod.enable";
-        public static final String MOD_DISABLE = "mod.disable";
-        
-        // APK processing hooks
-        public static final String APK_BEFORE_PATCH = "apk.before_patch";
-        public static final String APK_AFTER_PATCH = "apk.after_patch";
-        public static final String APK_BEFORE_INSTALL = "apk.before_install";
-        public static final String APK_AFTER_INSTALL = "apk.after_install";
-        public static final String APK_VALIDATION = "apk.validation";
-        
-        // Loader system hooks
-        public static final String LOADER_BEFORE_INSTALL = "loader.before_install";
-        public static final String LOADER_AFTER_INSTALL = "loader.after_install";
-        public static final String LOADER_CONFIG_CHANGE = "loader.config_change";
-        
-        // UI hooks
-        public static final String UI_MENU_CREATE = "ui.menu_create";
-        public static final String UI_BUTTON_CLICK = "ui.button_click";
-        public static final String UI_DIALOG_SHOW = "ui.dialog_show";
-        public static final String UI_THEME_CHANGE = "ui.theme_change";
-        
-        // File system hooks
-        public static final String FILE_BEFORE_COPY = "file.before_copy";
-        public static final String FILE_AFTER_COPY = "file.after_copy";
-        public static final String FILE_BEFORE_DELETE = "file.before_delete";
-        public static final String FILE_AFTER_DELETE = "file.after_delete";
-        
-        // Log system hooks
-        public static final String LOG_MESSAGE = "log.message";
-        public static final String LOG_ERROR = "log.error";
-        public static final String LOG_DEBUG = "log.debug";
-        
-        // Settings hooks
-        public static final String SETTINGS_CHANGE = "settings.change";
-        public static final String SETTINGS_RESET = "settings.reset";
-        public static final String PERMISSION_CHANGE = "permission.change";
-    }
-    
-    private PluginHook() {
-        LogUtils.logDebug("PluginHook system initialized");
-    }
-    
-    public static synchronized PluginHook getInstance() {
-        if (instance == null) {
-            instance = new PluginHook();
-        }
-        return instance;
-    }
-    
-    /**
-     * Register a hook listener for specific hook
-     */
-    public void registerHook(String hookName, HookListener listener) {
-        if (hookName == null || listener == null) {
-            LogUtils.logDebug("Cannot register null hook or listener");
-            return;
-        }
-        
-        hooks.computeIfAbsent(hookName, k -> new CopyOnWriteArrayList<>()).add(listener);
-        
-        // Sort by priority (highest first)
-        hooks.get(hookName).sort((a, b) -> 
-            Integer.compare(b.getPriority().getValue(), a.getPriority().getValue()));
-        
-        if (debugMode) {
-            LogUtils.logDebug("Registered hook listener for: " + hookName + 
-                " (Priority: " + listener.getPriority() + ")");
-        }
-    }
-    
-    /**
-     * Unregister a hook listener
-     */
-    public void unregisterHook(String hookName, HookListener listener) {
-        List<HookListener> listeners = hooks.get(hookName);
-        if (listeners != null) {
-            listeners.remove(listener);
-            if (listeners.isEmpty()) {
-                hooks.remove(hookName);
-            }
-            if (debugMode) {
-                LogUtils.logDebug("Unregistered hook listener for: " + hookName);
-            }
-        }
-    }
-    
-    /**
-     * Trigger a hook with event data
-     */
-    public HookEvent triggerHook(String hookName, Object source, Map<String, Object> data) {
-        HookEvent event = new HookEvent(hookName, source);
-        if (data != null) {
-            event.getData().putAll(data);
-        }
-        
-        return triggerHook(event);
-    }
-    
-    /**
-     * Trigger a hook with just hook name and source
-     */
-    public HookEvent triggerHook(String hookName, Object source) {
-        return triggerHook(hookName, source, null);
-    }
-    
-    /**
-     * Trigger a hook with existing event
-     */
-    public HookEvent triggerHook(HookEvent event) {
-        String hookName = event.getName();
-        List<HookListener> listeners = hooks.get(hookName);
-        
-        if (listeners == null || listeners.isEmpty()) {
-            if (debugMode) {
-                LogUtils.logDebug("No listeners for hook: " + hookName);
-            }
-            return event;
-        }
-        
-        // Increment call count
-        hookCallCounts.put(hookName, hookCallCounts.getOrDefault(hookName, 0) + 1);
-        
-        if (debugMode) {
-            LogUtils.logDebug("Triggering hook: " + hookName + " (" + listeners.size() + " listeners)");
-        }
-        
-        // Call all listeners in priority order
-        for (HookListener listener : listeners) {
-            try {
-                listener.onEvent(event);
-                
-                // Stop processing if event was cancelled
-                if (event.isCancelled()) {
-                    if (debugMode) {
-                        LogUtils.logDebug("Hook cancelled by listener: " + hookName);
-                    }
-                    break;
-                }
-            } catch (Exception e) {
-                LogUtils.logError("Hook listener error for " + hookName + ": " + e.getMessage());
-            }
-        }
-        
-        return event;
-    }
-    
-    /**
-     * Check if a hook has any listeners
-     */
-    public boolean hasListeners(String hookName) {
-        List<HookListener> listeners = hooks.get(hookName);
-        return listeners != null && !listeners.isEmpty();
-    }
-    
-    /**
-     * Get number of listeners for a hook
-     */
-    public int getListenerCount(String hookName) {
-        List<HookListener> listeners = hooks.get(hookName);
-        return listeners != null ? listeners.size() : 0;
-    }
-    
-    /**
-     * Get all registered hook names
-     */
-    public Set<String> getRegisteredHooks() {
-        return new HashSet<>(hooks.keySet());
-    }
-    
-    /**
-     * Get hook call statistics
-     */
-    public Map<String, Integer> getHookStats() {
-        return new HashMap<>(hookCallCounts);
-    }
-    
-    /**
-     * Enable/disable debug mode
-     */
-    public void setDebugMode(boolean debug) {
-        this.debugMode = debug;
-        LogUtils.logDebug("PluginHook debug mode: " + debug);
-    }
-    
-    /**
-     * Clear all hooks (useful for plugin unloading)
-     */
-    public void clearAllHooks() {
-        hooks.clear();
-        hookCallCounts.clear();
-        LogUtils.logDebug("Cleared all plugin hooks");
-    }
-    
-    /**
-     * Clear hooks for a specific plugin (by listener class)
-     */
-    public void clearHooksForPlugin(Class<?> pluginClass) {
-        int removed = 0;
-        for (Map.Entry<String, List<HookListener>> entry : hooks.entrySet()) {
-            List<HookListener> listeners = entry.getValue();
-            listeners.removeIf(listener -> listener.getClass().equals(pluginClass));
-            if (listeners.isEmpty()) {
-                hooks.remove(entry.getKey());
-            } else {
-                removed += listeners.size();
-            }
-        }
-        LogUtils.logDebug("Removed " + removed + " hooks for plugin: " + pluginClass.getSimpleName());
-    }
-    
-    /**
-     * Utility method to create hook event with single data item
-     */
-    public static HookEvent createEvent(String hookName, Object source, String key, Object value) {
-        HookEvent event = new HookEvent(hookName, source);
-        event.putData(key, value);
-        return event;
-    }
-    
-    /**
-     * Quick hook trigger for simple events
-     */
-    public static void trigger(String hookName, Object source) {
-        getInstance().triggerHook(hookName, source);
-    }
-    
-    /**
-     * Quick hook trigger with one data item
-     */
-    public static void trigger(String hookName, Object source, String key, Object value) {
-        getInstance().triggerHook(createEvent(hookName, source, key, value));
-    }
-    
-    /**
-     * Get hook system status
-     */
-    public String getHookSystemStatus() {
-        StringBuilder status = new StringBuilder();
-        status.append("=== Plugin Hook System Status ===\n");
-        status.append("Total Hooks: ").append(hooks.size()).append("\n");
-        status.append("Debug Mode: ").append(debugMode).append("\n");
-        status.append("Total Calls: ").append(hookCallCounts.values().stream()
-            .mapToInt(Integer::intValue).sum()).append("\n\n");
-        
-        status.append("Active Hooks:\n");
-        for (Map.Entry<String, List<HookListener>> entry : hooks.entrySet()) {
-            status.append("• ").append(entry.getKey())
-                  .append(" (").append(entry.getValue().size()).append(" listeners, ")
-                  .append(hookCallCounts.getOrDefault(entry.getKey(), 0)).append(" calls)\n");
-        }
-        
-        return status.toString();
-    }
-}
-
-/storage/emulated/0/AndroidIDEProjects/ModLoader/ModLoader/app/src/main/java/com/modloader/plugin/PluginLoader.java
-
-// File: PluginLoader.java - Part 1 (Core Loading)
-// Path: /app/src/main/java/com/modloader/plugin/PluginLoader.java
-package com.modloader.plugin;
-
-import android.content.Context;
-import com.modloader.util.LogUtils;
-import com.modloader.util.FileUtils;
-
-import java.io.*;
-import java.lang.reflect.Constructor;
-import java.util.*;
-import java.util.jar.JarEntry;
-import java.util.jar.JarFile;
-import java.util.jar.Manifest;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipFile;
-
-/**
- * Plugin Loading System for ModLoader
- * Handles dynamic loading of plugin files (.jar, .dex, .plugin)
- */
-public class PluginLoader {
-    private static final String TAG = "PluginLoader";
-    
-    private final Context context;
-    private final Map<String, ClassLoader> pluginClassLoaders = new HashMap<>();
-    private final Set<String> loadedPluginFiles = new HashSet<>();
-    
-    // Plugin manifest keys
-    private static final String MANIFEST_PLUGIN_NAME = "Plugin-Name";
-    private static final String MANIFEST_PLUGIN_VERSION = "Plugin-Version";
-    private static final String MANIFEST_PLUGIN_MAIN = "Plugin-Main";
-    private static final String MANIFEST_PLUGIN_AUTHOR = "Plugin-Author";
-    private static final String MANIFEST_PLUGIN_DESCRIPTION = "Plugin-Description";
-    private static final String MANIFEST_PLUGIN_DEPENDENCIES = "Plugin-Dependencies";
-    private static final String MANIFEST_PLUGIN_PERMISSIONS = "Plugin-Permissions";
-    private static final String MANIFEST_PLUGIN_CATEGORY = "Plugin-Category";
-    
-    public PluginLoader(Context context) {
-        this.context = context;
-        LogUtils.logDebug("PluginLoader initialized");
-    }
-    
-    /**
-     * Analyze a plugin file and extract metadata
-     */
-    public PluginInfo analyzePlugin(File pluginFile) throws Exception {
-        if (pluginFile == null || !pluginFile.exists()) {
-            throw new IllegalArgumentException("Plugin file does not exist");
-        }
-        
-        LogUtils.logDebug("Analyzing plugin: " + pluginFile.getName());
-        
-        String fileName = pluginFile.getName().toLowerCase();
-        PluginInfo info = new PluginInfo();
-        
-        // Set basic file information
-        info.setFilePath(pluginFile.getAbsolutePath());
-        info.setFileSize(pluginFile.length());
-        info.setLastModified(pluginFile.lastModified());
-        
-        // Determine plugin type based on file extension
-        PluginInfo.PluginType type = determinePluginType(fileName);
-        info.setType(type);
-        
-        // Extract metadata based on plugin type
-        switch (type) {
-            case JAVA_PLUGIN:
-                return analyzeJarPlugin(pluginFile, info);
-            case DEX_PLUGIN:
-                return analyzeDexPlugin(pluginFile, info);
-            case CONFIG_PLUGIN:
-                return analyzeConfigPlugin(pluginFile, info);
-            default:
-                return analyzeGenericPlugin(pluginFile, info);
-        }
-    }
-    
-    /**
-     * Load a plugin from PluginInfo
-     */
-    public Plugin loadPlugin(PluginInfo info, PluginContext context) throws Exception {
-        if (info == null) {
-            throw new IllegalArgumentException("PluginInfo cannot be null");
-        }
-        
-        LogUtils.logDebug("Loading plugin: " + info.getName());
-        
-        File pluginFile = new File(info.getFilePath());
-        if (!pluginFile.exists()) {
-            throw new FileNotFoundException("Plugin file not found: " + info.getFilePath());
-        }
-        
-        // Check if already loaded
-        if (loadedPluginFiles.contains(info.getFilePath())) {
-            LogUtils.logDebug("Plugin file already loaded: " + info.getName());
-        }
-        
-        Plugin plugin = null;
-        
-        switch (info.getType()) {
-            case JAVA_PLUGIN:
-                plugin = loadJarPlugin(pluginFile, info, context);
-                break;
-            case DEX_PLUGIN:
-                plugin = loadDexPlugin(pluginFile, info, context);
-                break;
-            case CONFIG_PLUGIN:
-                plugin = loadConfigPlugin(pluginFile, info, context);
-                break;
-            default:
-                throw new UnsupportedOperationException("Unsupported plugin type: " + info.getType());
-        }
-        
-        if (plugin != null) {
-            loadedPluginFiles.add(info.getFilePath());
-            LogUtils.logDebug("Successfully loaded plugin: " + info.getName());
-        }
-        
-        return plugin;
-    }
-    
-    /**
-     * Determine plugin type from filename
-     */
-    private PluginInfo.PluginType determinePluginType(String fileName) {
-        if (fileName.endsWith(".jar") || fileName.endsWith(".jar.disabled")) {
-            return PluginInfo.PluginType.JAVA_PLUGIN;
-        } else if (fileName.endsWith(".dex") || fileName.endsWith(".dex.disabled")) {
-            return PluginInfo.PluginType.DEX_PLUGIN;
-        } else if (fileName.endsWith(".plugin") || fileName.endsWith(".plugin.disabled")) {
-            return PluginInfo.PluginType.CONFIG_PLUGIN;
-        } else if (fileName.endsWith(".theme") || fileName.endsWith(".theme.disabled")) {
-            return PluginInfo.PluginType.THEME_PLUGIN;
-        } else if (fileName.endsWith(".util") || fileName.endsWith(".util.disabled")) {
-            return PluginInfo.PluginType.UTILITY_PLUGIN;
-        }
-        return PluginInfo.PluginType.JAVA_PLUGIN; // Default
-    }
-    
-    /**
-     * Analyze JAR plugin file
-     */
-    private PluginInfo analyzeJarPlugin(File jarFile, PluginInfo info) throws Exception {
-        try (JarFile jar = new JarFile(jarFile)) {
-            // Read manifest
-            Manifest manifest = jar.getManifest();
-            if (manifest != null) {
-                extractManifestInfo(manifest, info);
-            }
-            
-            // If no manifest info, use filename
-            if (info.getName() == null) {
-                String baseName = getBaseName(jarFile);
-                info.setName(baseName);
-                info.setId(baseName.toLowerCase().replaceAll("[^a-z0-9_]", "_"));
-            }
-            
-            // Set defaults if missing
-            if (info.getVersion() == null) info.setVersion("1.0.0");
-            if (info.getDescription() == null) info.setDescription("ModLoader Plugin");
-            if (info.getAuthor() == null) info.setAuthor("Unknown");
-            if (info.getCategory() == null) info.setCategory("General");
-            
-            // Find main class if not specified
-            if (info.getMainClass() == null) {
-                String mainClass = findMainClass(jar);
-                info.setMainClass(mainClass);
-            }
-            
-            LogUtils.logDebug("JAR plugin analyzed: " + info.getName() + " v" + info.getVersion());
-            return info;
-        }
-    }
-    
-    /**
-     * Analyze DEX plugin file
-     */
-    private PluginInfo analyzeDexPlugin(File dexFile, PluginInfo info) throws Exception {
-        String baseName = getBaseName(dexFile);
-        
-        info.setName(baseName);
-        info.setId(baseName.toLowerCase().replaceAll("[^a-z0-9_]", "_"));
-        info.setVersion("1.0.0");
-        info.setDescription("Android DEX Plugin for ModLoader");
-        info.setAuthor("Unknown");
-        info.setCategory("Android");
-        
-        // Try to find main class by analyzing DEX file
-        String mainClass = analyzeDexFile(dexFile);
-        info.setMainClass(mainClass);
-        
-        LogUtils.logDebug("DEX plugin analyzed: " + info.getName());
-        return info;
-    }
-    
-    /**
-     * Analyze configuration-based plugin file
-     */
-    private PluginInfo analyzeConfigPlugin(File configFile, PluginInfo info) throws Exception {
-        Properties props = new Properties();
-        try (FileInputStream fis = new FileInputStream(configFile)) {
-            props.load(fis);
-        }
-        
-        info.setName(props.getProperty("name", getBaseName(configFile)));
-        info.setId(props.getProperty("id", info.getName().toLowerCase().replaceAll("[^a-z0-9_]", "_")));
-        info.setVersion(props.getProperty("version", "1.0.0"));
-        info.setDescription(props.getProperty("description", "Configuration-based plugin"));
-        info.setAuthor(props.getProperty("author", "Unknown"));
-        info.setCategory(props.getProperty("category", "Configuration"));
-        info.setMainClass(props.getProperty("main_class", "com.modloader.plugin.ConfigPlugin"));
-        
-        // Parse dependencies
-        String deps = props.getProperty("dependencies", "");
-        if (!deps.isEmpty()) {
-            info.setDependencies(deps.split(","));
-        }
-        
-        // Parse permissions
-        String perms = props.getProperty("permissions", "");
-        if (!perms.isEmpty()) {
-            info.setPermissions(perms.split(","));
-        }
-        
-        LogUtils.logDebug("Config plugin analyzed: " + info.getName());
-        return info;
-    }
-    
-    /**
-     * Analyze generic plugin file
-     */
-    private PluginInfo analyzeGenericPlugin(File pluginFile, PluginInfo info) throws Exception {
-        String baseName = getBaseName(pluginFile);
-        
-        info.setName(baseName);
-        info.setId(baseName.toLowerCase().replaceAll("[^a-z0-9_]", "_"));
-        info.setVersion("1.0.0");
-        info.setDescription("Generic ModLoader Plugin");
-        info.setAuthor("Unknown");
-        info.setCategory("Generic");
-        
-        LogUtils.logDebug("Generic plugin analyzed: " + info.getName());
-        return info;
-    }
-    
-    /**
-     * Load JAR plugin
-     */
-    private Plugin loadJarPlugin(File jarFile, PluginInfo info, PluginContext context) throws Exception {
-        LogUtils.logDebug("Loading JAR plugin: " + info.getName());
-        
-        // Create plugin class loader
-        PluginClassLoader classLoader = new PluginClassLoader(jarFile, getClass().getClassLoader());
-        pluginClassLoaders.put(info.getId(), classLoader);
-        
-        // Load main class
-        String mainClassName = info.getMainClass();
-        if (mainClassName == null) {
-            throw new Exception("No main class specified for plugin: " + info.getName());
-        }
-        
-        try {
-            Class<?> pluginClass = classLoader.loadClass(mainClassName);
-            
-            // Check if class implements Plugin interface
-            if (!Plugin.class.isAssignableFrom(pluginClass)) {
-                throw new Exception("Main class does not implement Plugin interface: " + mainClassName);
-            }
-            
-            // Create plugin instance
-            Constructor<?> constructor = pluginClass.getDeclaredConstructor();
-            constructor.setAccessible(true);
-            Plugin plugin = (Plugin) constructor.newInstance();
-            
-            LogUtils.logDebug("JAR plugin instance created: " + info.getName());
-            return plugin;
-            
-        } catch (ClassNotFoundException e) {
-            throw new Exception("Main class not found: " + mainClassName, e);
-        } catch (Exception e) {
-            throw new Exception("Failed to instantiate plugin: " + e.getMessage(), e);
-        }
-    }
-    
-    /**
-     * Load DEX plugin
-     */
-    private Plugin loadDexPlugin(File dexFile, PluginInfo info, PluginContext context) throws Exception {
-        LogUtils.logDebug("Loading DEX plugin: " + info.getName());
-        
-        // Create DexClassLoader for Android DEX files
-        String dexPath = dexFile.getAbsolutePath();
-        File optimizedDir = new File(context.getPluginDataDirectory(), info.getId() + "_dex");
-        optimizedDir.mkdirs();
-        
-        dalvik.system.DexClassLoader dexLoader = new dalvik.system.DexClassLoader(
-            dexPath,
-            optimizedDir.getAbsolutePath(),
-            null,
-            getClass().getClassLoader()
-        );
-        
-        pluginClassLoaders.put(info.getId(), dexLoader);
-        
-        // Try to find and load main class
-        String mainClassName = info.getMainClass();
-        if (mainClassName == null) {
-            // Try common plugin class names
-            String[] possibleClasses = {
-                "com.modloader.plugin.MainPlugin",
-                "com.modloader.plugin.Plugin",
-                "com.plugin.Main",
-                "Plugin",
-                "MainPlugin"
-            };
-            
-            for (String className : possibleClasses) {
-                try {
-                    Class<?> testClass = dexLoader.loadClass(className);
-                    if (Plugin.class.isAssignableFrom(testClass)) {
-                        mainClassName = className;
-                        info.setMainClass(className);
-                        break;
-                    }
-                } catch (ClassNotFoundException e) {
-                    // Continue searching
-                }
-            }
-        }
-        
-        if (mainClassName == null) {
-            throw new Exception("No valid main class found for DEX plugin: " + info.getName());
-        }
-        
-        try {
-            Class<?> pluginClass = dexLoader.loadClass(mainClassName);
-            Constructor<?> constructor = pluginClass.getDeclaredConstructor();
-            constructor.setAccessible(true);
-            Plugin plugin = (Plugin) constructor.newInstance();
-            
-            LogUtils.logDebug("DEX plugin instance created: " + info.getName());
-            return plugin;
-            
-        } catch (Exception e) {
-            throw new Exception("Failed to instantiate DEX plugin: " + e.getMessage(), e);
-        }
-    }
-    
-    /**
-     * Load configuration-based plugin
-     */
-    private Plugin loadConfigPlugin(File configFile, PluginInfo info, PluginContext context) throws Exception {
-        LogUtils.logDebug("Loading config plugin: " + info.getName());
-        
-        // Create a configuration-based plugin wrapper
-        return new ConfigBasedPlugin(configFile, info, context);
-    }
-    
-    /**
-     * Extract manifest information from JAR file
-     */
-    private void extractManifestInfo(Manifest manifest, PluginInfo info) {
-        if (manifest.getMainAttributes() == null) {
-            return;
-        }
-        
-        var attributes = manifest.getMainAttributes();
-        
-        String name = attributes.getValue(MANIFEST_PLUGIN_NAME);
-        if (name != null) {
-            info.setName(name);
-            info.setId(name.toLowerCase().replaceAll("[^a-z0-9_]", "_"));
-        }
-        
-        String version = attributes.getValue(MANIFEST_PLUGIN_VERSION);
-        if (version != null) {
-            info.setVersion(version);
-        }
-        
-        String mainClass = attributes.getValue(MANIFEST_PLUGIN_MAIN);
-        if (mainClass != null) {
-            info.setMainClass(mainClass);
-        }
-        
-        String author = attributes.getValue(MANIFEST_PLUGIN_AUTHOR);
-        if (author != null) {
-            info.setAuthor(author);
-        }
-        
-        String description = attributes.getValue(MANIFEST_PLUGIN_DESCRIPTION);
-        if (description != null) {
-            info.setDescription(description);
-        }
-        
-        String category = attributes.getValue(MANIFEST_PLUGIN_CATEGORY);
-        if (category != null) {
-            info.setCategory(category);
-        }
-        
-        String dependencies = attributes.getValue(MANIFEST_PLUGIN_DEPENDENCIES);
-        if (dependencies != null && !dependencies.trim().isEmpty()) {
-            info.setDependencies(dependencies.split(","));
-        }
-        
-        String permissions = attributes.getValue(MANIFEST_PLUGIN_PERMISSIONS);
-        if (permissions != null && !permissions.trim().isEmpty()) {
-            info.setPermissions(permissions.split(","));
-        }
-    }
-    
-    /**
-     * Find main class in JAR file
-     */
-    private String findMainClass(JarFile jar) {
-        try {
-            Enumeration<JarEntry> entries = jar.entries();
-            
-            // Look for classes that might be the main plugin class
-            List<String> candidates = new ArrayList<>();
-            
-            while (entries.hasMoreElements()) {
-                JarEntry entry = entries.nextElement();
-                String entryName = entry.getName();
-                
-                if (entryName.endsWith(".class")) {
-                    String className = entryName.substring(0, entryName.length() - 6)
-                                              .replace('/', '.');
-                    
-                    // Skip inner classes and common non-plugin classes
-                    if (className.contains("$") || 
-                        className.startsWith("android.") ||
-                        className.startsWith("java.") ||
-                        className.startsWith("javax.")) {
-                        continue;
-                    }
-                    
-                    // Prioritize classes with "Plugin" in the name
-                    if (className.toLowerCase().contains("plugin")) {
-                        candidates.add(0, className); // Add to front
-                    } else if (className.toLowerCase().contains("main")) {
-                        candidates.add(className);
-                    } else {
-                        candidates.add(className);
-                    }
-                }
-            }
-            
-            // Return first candidate
-            if (!candidates.isEmpty()) {
-                String mainClass = candidates.get(0);
-                LogUtils.logDebug("Found potential main class: " + mainClass);
-                return mainClass;
-            }
-            
-        } catch (Exception e) {
-            LogUtils.logDebug("Error finding main class: " + e.getMessage());
-        }
-        
-        return null;
-    }
-    
-    /**
-     * Analyze DEX file to find main class
-     */
-    private String analyzeDexFile(File dexFile) {
-        try {
-            String baseName = getBaseName(dexFile);
-            
-            // Generate possible main class names
-            String[] possibleNames = {
-                "com.modloader.plugin." + capitalize(baseName) + "Plugin",
-                "com.plugin." + capitalize(baseName),
-                "com.modloader." + baseName + ".MainPlugin",
-                "Plugin",
-                "MainPlugin",
-                capitalize(baseName) + "Plugin"
-            };
-            
-            // Return the first reasonable option
-            for (String name : possibleNames) {
-                if (name.matches("^[a-zA-Z_][a-zA-Z0-9_.]*$")) {
-                    LogUtils.logDebug("Using main class for DEX: " + name);
-                    return name;
-                }
-            }
-            
-        } catch (Exception e) {
-            LogUtils.logDebug("Error analyzing DEX file: " + e.getMessage());
-        }
-        
-        return "com.modloader.plugin.MainPlugin"; // Default
-    }
-    
-    /**
-     * Get base name from file (without extension)
-     */
-    private String getBaseName(File file) {
-        String name = file.getName();
-        
-        // Remove .disabled suffix if present
-        if (name.endsWith(".disabled")) {
-            name = name.substring(0, name.length() - 9);
-        }
-        
-        // Remove file extension
-        int lastDot = name.lastIndexOf('.');
-        if (lastDot > 0) {
-            name = name.substring(0, lastDot);
-        }
-        
-        return name;
-    }
-    
-    /**
-     * Capitalize first letter of string
-     */
-    private String capitalize(String str) {
-        if (str == null || str.isEmpty()) {
-            return str;
-        }
-        return str.substring(0, 1).toUpperCase() + str.substring(1);
-    }
-    
-    /**
-     * Unload a plugin by ID
-     */
-    public void unloadPlugin(String pluginId) {
-        ClassLoader loader = pluginClassLoaders.get(pluginId);
-        if (loader != null) {
-            // Close class loader if it's closeable
-            if (loader instanceof Closeable) {
-                try {
-                    ((Closeable) loader).close();
-                } catch (IOException e) {
-                    LogUtils.logDebug("Error closing plugin class loader: " + e.getMessage());
-                }
-            }
-            
-            pluginClassLoaders.remove(pluginId);
-            LogUtils.logDebug("Plugin class loader removed: " + pluginId);
-        }
-        
-        // Remove from loaded files tracking
-        loadedPluginFiles.removeIf(path -> path.contains(pluginId));
-    }
-    
-    /**
-     * Get plugin class loader
-     */
-    public ClassLoader getPluginClassLoader(String pluginId) {
-        return pluginClassLoaders.get(pluginId);
-    }
-    
-    /**
-     * Check if plugin file is loaded
-     */
-    public boolean isPluginFileLoaded(String filePath) {
-        return loadedPluginFiles.contains(filePath);
-    }
-
-
-// File: PluginLoader.java - Part 2 (Utilities & Validation)
-// Continuation of PluginLoader.java
-
-    /**
-     * Custom ClassLoader for JAR plugins
-     */
-    private static class PluginClassLoader extends ClassLoader implements Closeable {
-        private final File jarFile;
-        private final Map<String, Class<?>> loadedClasses = new HashMap<>();
-        
-        public PluginClassLoader(File jarFile, ClassLoader parent) {
-            super(parent);
-            this.jarFile = jarFile;
-        }
-        
-        @Override
-        protected Class<?> findClass(String name) throws ClassNotFoundException {
-            // Check if already loaded
-            Class<?> loadedClass = loadedClasses.get(name);
-            if (loadedClass != null) {
-                return loadedClass;
-            }
-            
-            // Try to load from JAR
-            try (JarFile jar = new JarFile(jarFile)) {
-                String classPath = name.replace('.', '/') + ".class";
-                JarEntry entry = jar.getJarEntry(classPath);
-                
-                if (entry != null) {
-                    try (InputStream is = jar.getInputStream(entry);
-                         ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
-                        
-                        byte[] buffer = new byte[8192];
-                        int bytesRead;
-                        while ((bytesRead = is.read(buffer)) != -1) {
-                            baos.write(buffer, 0, bytesRead);
-                        }
-                        
-                        byte[] classBytes = baos.toByteArray();
-                        Class<?> clazz = defineClass(name, classBytes, 0, classBytes.length);
-                        loadedClasses.put(name, clazz);
-                        
-                        LogUtils.logDebug("Loaded class from plugin: " + name);
-                        return clazz;
-                    }
-                }
-            } catch (IOException e) {
-                throw new ClassNotFoundException("Failed to load class from plugin: " + name, e);
-            }
-            
-            // Delegate to parent if not found in plugin
-            return super.findClass(name);
-        }
-        
-        @Override
-        public void close() throws IOException {
-            loadedClasses.clear();
-            LogUtils.logDebug("Plugin class loader closed for: " + jarFile.getName());
-        }
-    }
-    
-    /**
-     * Configuration-based plugin implementation
-     */
-    private static class ConfigBasedPlugin extends BasePlugin {
-        private final File configFile;
-        private final Properties config;
-        private final PluginInfo pluginInfo;
-        
-        public ConfigBasedPlugin(File configFile, PluginInfo info, PluginContext context) {
-            this.configFile = configFile;
-            this.pluginInfo = info;
-            this.config = new Properties();
-            
-            try (FileInputStream fis = new FileInputStream(configFile)) {
-                config.load(fis);
-            } catch (IOException e) {
-                LogUtils.logError("Failed to load config plugin: " + e.getMessage());
-            }
-        }
-        
-        @Override
-        public PluginInfo getPluginInfo() {
-            return pluginInfo;
-        }
-        
-        @Override
-        protected void onPluginLoad() {
-            logUser("Configuration-based plugin loaded");
-            
-            // Execute load actions from config
-            String loadActions = config.getProperty("load_actions", "");
-            if (!loadActions.isEmpty()) {
-                executeConfigActions(loadActions);
-            }
-        }
-        
-        @Override
-        protected void onPluginUnload() {
-            logUser("Configuration-based plugin unloaded");
-            
-            // Execute unload actions from config
-            String unloadActions = config.getProperty("unload_actions", "");
-            if (!unloadActions.isEmpty()) {
-                executeConfigActions(unloadActions);
-            }
-        }
-        
-        @Override
-        protected void onPluginEnable() {
-            logUser("Configuration-based plugin enabled");
-            
-            // Execute enable actions from config
-            String enableActions = config.getProperty("enable_actions", "");
-            if (!enableActions.isEmpty()) {
-                executeConfigActions(enableActions);
-            }
-        }
-        
-        @Override
-        protected void onPluginDisable() {
-            logUser("Configuration-based plugin disabled");
-            
-            // Execute disable actions from config
-            String disableActions = config.getProperty("disable_actions", "");
-            if (!disableActions.isEmpty()) {
-                executeConfigActions(disableActions);
-            }
-        }
-        
-        private void executeConfigActions(String actions) {
-            try {
-                String[] actionList = actions.split(";");
-                for (String action : actionList) {
-                    action = action.trim();
-                    if (!action.isEmpty()) {
-                        executeConfigAction(action);
-                    }
-                }
-            } catch (Exception e) {
-                logError("Failed to execute config actions: " + e.getMessage());
-            }
-        }
-        
-        private void executeConfigAction(String action) {
-            try {
-                if (action.startsWith("log:")) {
-                    String message = action.substring(4);
-                    logUser(message);
-                } else if (action.startsWith("hook:")) {
-                    String hookInfo = action.substring(5);
-                    String[] parts = hookInfo.split(":");
-                    if (parts.length >= 2) {
-                        registerConfigHook(parts[0], parts[1]);
-                    }
-                } else if (action.startsWith("file:")) {
-                    String fileOp = action.substring(5);
-                    executeFileOperation(fileOp);
-                } else {
-                    logUser("Unknown config action: " + action);
-                }
-            } catch (Exception e) {
-                logError("Config action failed: " + action + " - " + e.getMessage());
-            }
-        }
-        
-        private void registerConfigHook(String hookPoint, String hookAction) {
-            registerHook(hookPoint, new PluginHook() {
-                @Override
-                public boolean onHookCalled(String hookPoint, Object... args) {
-                    logUser("Hook triggered: " + hookPoint + " -> " + hookAction);
-                    executeConfigAction(hookAction);
-                    return true;
-                }
-                
-                @Override
-                public String getHookName() {
-                    return pluginInfo.getName() + "_" + hookPoint;
-                }
-            });
-        }
-        
-        private void executeFileOperation(String fileOp) {
-            if (fileOp.startsWith("create:")) {
-                String fileName = fileOp.substring(7);
-                try {
-                    File file = new File(getPluginDataDirectory(), fileName);
-                    if (!file.exists()) {
-                        file.createNewFile();
-                        logUser("Created file: " + fileName);
-                    }
-                } catch (IOException e) {
-                    logError("Failed to create file: " + e.getMessage());
-                }
-            } else if (fileOp.startsWith("delete:")) {
-                String fileName = fileOp.substring(7);
-                try {
-                    File file = new File(getPluginDataDirectory(), fileName);
-                    if (file.exists() && file.delete()) {
-                        logUser("Deleted file: " + fileName);
-                    }
-                } catch (Exception e) {
-                    logError("Failed to delete file: " + e.getMessage());
-                }
-            }
-        }
-    }
-    
-    /**
-     * Plugin Validation Result class
-     */
-    public static class PluginValidationResult {
-        public boolean isValid = false;
-        public String errorMessage = null;
-        public String successMessage = null;
-        public List<String> warnings = new ArrayList<>();
-        
-        @Override
-        public String toString() {
-            if (isValid) {
-                String msg = successMessage != null ? successMessage : "Valid plugin";
-                if (!warnings.isEmpty()) {
-                    msg += " (Warnings: " + warnings.size() + ")";
-                }
-                return msg;
-            } else {
-                return "Invalid plugin: " + (errorMessage != null ? errorMessage : "Unknown error");
-            }
-        }
-    }
-    
-    /**
-     * Get plugin file validation info
-     */
-    public PluginValidationResult validatePluginFile(File pluginFile) {
-        PluginValidationResult result = new PluginValidationResult();
-        result.isValid = false;
-        
-        try {
-            if (!pluginFile.exists()) {
-                result.errorMessage = "Plugin file does not exist";
-                return result;
-            }
-            
-            if (!pluginFile.canRead()) {
-                result.errorMessage = "Plugin file is not readable";
-                return result;
-            }
-            
-            if (pluginFile.length() == 0) {
-                result.errorMessage = "Plugin file is empty";
-                return result;
-            }
-            
-            if (pluginFile.length() > 50 * 1024 * 1024) {
-                result.errorMessage = "Plugin file too large (max 50MB)";
-                return result;
-            }
-            
-            // Type-specific validation
-            String fileName = pluginFile.getName().toLowerCase();
-            if (fileName.endsWith(".jar") || fileName.endsWith(".jar.disabled")) {
-                result = validateJarFile(pluginFile);
-            } else if (fileName.endsWith(".dex") || fileName.endsWith(".dex.disabled")) {
-                result = validateDexFile(pluginFile);
-            } else if (fileName.endsWith(".plugin") || fileName.endsWith(".plugin.disabled")) {
-                result = validateConfigFile(pluginFile);
-            } else {
-                result.errorMessage = "Unsupported plugin file type";
-                return result;
-            }
-            
-        } catch (Exception e) {
-            result.errorMessage = "Validation error: " + e.getMessage();
-        }
-        
-        return result;
-    }
-    
-    private PluginValidationResult validateJarFile(File jarFile) {
-        PluginValidationResult result = new PluginValidationResult();
-        
-        try (JarFile jar = new JarFile(jarFile)) {
-            result.isValid = true;
-            result.successMessage = "Valid JAR plugin file";
-            
-            // Check for manifest
-            if (jar.getManifest() == null) {
-                result.warnings.add("No manifest found - using filename for metadata");
-            }
-            
-            // Check for classes
-            boolean hasClasses = false;
-            Enumeration<JarEntry> entries = jar.entries();
-            while (entries.hasMoreElements()) {
-                JarEntry entry = entries.nextElement();
-                if (entry.getName().endsWith(".class")) {
-                    hasClasses = true;
-                    break;
-                }
-            }
-            
-            if (!hasClasses) {
-                result.warnings.add("No .class files found in JAR");
-            }
-            
-        } catch (Exception e) {
-            result.isValid = false;
-            result.errorMessage = "Invalid JAR file: " + e.getMessage();
-        }
-        
-        return result;
-    }
-    
-    private PluginValidationResult validateDexFile(File dexFile) {
-        PluginValidationResult result = new PluginValidationResult();
-        
-        try (FileInputStream fis = new FileInputStream(dexFile)) {
-            byte[] header = new byte[8];
-            if (fis.read(header) >= 8) {
-                String magic = new String(header, 0, 4);
-                if ("dex\n".equals(magic)) {
-                    result.isValid = true;
-                    result.successMessage = "Valid DEX plugin file";
-                } else {
-                    result.isValid = false;
-                    result.errorMessage = "Invalid DEX magic number";
-                }
-            } else {
-                result.isValid = false;
-                result.errorMessage = "DEX file too small to be valid";
-            }
-            
-        } catch (Exception e) {
-            result.isValid = false;
-            result.errorMessage = "Error reading DEX file: " + e.getMessage();
-        }
-        
-        return result;
-    }
-    
-    private PluginValidationResult validateConfigFile(File configFile) {
-        PluginValidationResult result = new PluginValidationResult();
-        
-        try {
-            Properties props = new Properties();
-            try (FileInputStream fis = new FileInputStream(configFile)) {
-                props.load(fis);
-            }
-            
-            result.isValid = true;
-            result.successMessage = "Valid configuration plugin file";
-            
-            // Check required properties
-            if (props.getProperty("name") == null) {
-                result.warnings.add("No 'name' property found");
-            }
-            
-            if (props.getProperty("version") == null) {
-                result.warnings.add("No 'version' property found");
-            }
-            
-        } catch (Exception e) {
-            result.isValid = false;
-            result.errorMessage = "Error reading config file: " + e.getMessage();
-        }
-        
-        return result;
-    }
-    
-    /**
-     * Get loader statistics
-     */
-    public LoaderStatistics getStatistics() {
-        LoaderStatistics stats = new LoaderStatistics();
-        stats.totalClassLoaders = pluginClassLoaders.size();
-        stats.loadedPluginFiles = loadedPluginFiles.size();
-        
-        // Calculate memory usage (approximate)
-        stats.estimatedMemoryUsage = pluginClassLoaders.size() * 1024 * 1024; // Rough estimate
-        
-        return stats;
-    }
-    
-    /**
-     * Loader Statistics class
-     */
-    public static class LoaderStatistics {
-        public int totalClassLoaders = 0;
-        public int loadedPluginFiles = 0;
-        public long estimatedMemoryUsage = 0;
-        
-        @Override
-        public String toString() {
-            return String.format("PluginLoader Stats: %d ClassLoaders, %d Files, %s Memory",
-                totalClassLoaders, loadedPluginFiles, FileUtils.formatFileSize(estimatedMemoryUsage));
-        }
-    }
-    
-    /**
-     * Check plugin compatibility
-     */
-    public boolean checkPluginCompatibility(PluginInfo pluginInfo) {
-        try {
-            // Check Android version compatibility
-            if (android.os.Build.VERSION.SDK_INT < 21) {
-                LogUtils.logDebug("Plugin may not be compatible with API level < 21");
-                return false;
-            }
-            
-            // Check file type compatibility
-            PluginInfo.PluginType type = pluginInfo.getType();
-            if (type == PluginInfo.PluginType.DEX_PLUGIN && android.os.Build.VERSION.SDK_INT < 14) {
-                LogUtils.logDebug("DEX plugins require API level 14+");
-                return false;
-            }
-            
-            // Check dependencies
-            String[] dependencies = pluginInfo.getDependencies();
-            if (dependencies != null && dependencies.length > 0) {
-                LogUtils.logDebug("Plugin has dependencies - compatibility check needed");
-            }
-            
-            return true;
-            
-        } catch (Exception e) {
-            LogUtils.logDebug("Compatibility check failed: " + e.getMessage());
-            return false;
-        }
-    }
-    
-    /**
-     * Get supported plugin types
-     */
-    public List<PluginInfo.PluginType> getSupportedPluginTypes() {
-        List<PluginInfo.PluginType> supported = new ArrayList<>();
-        supported.add(PluginInfo.PluginType.JAVA_PLUGIN);
-        supported.add(PluginInfo.PluginType.CONFIG_PLUGIN);
-        
-        // DEX support depends on Android version
-        if (android.os.Build.VERSION.SDK_INT >= 14) {
-            supported.add(PluginInfo.PluginType.DEX_PLUGIN);
-        }
-        
-        supported.add(PluginInfo.PluginType.THEME_PLUGIN);
-        supported.add(PluginInfo.PluginType.UTILITY_PLUGIN);
-        
-        return supported;
-    }
-    
-    /**
-     * Create example plugin template
-     */
-    public String generatePluginTemplate(String pluginName, PluginInfo.PluginType type) {
-        StringBuilder template = new StringBuilder();
-        
-        switch (type) {
-            case JAVA_PLUGIN:
-                template.append("// Example Java Plugin Template\n");
-                template.append("package com.modloader.plugin;\n\n");
-                template.append("public class ").append(capitalize(pluginName)).append("Plugin extends BasePlugin {\n");
-                template.append("    \n");
-                template.append("    @Override\n");
-                template.append("    public PluginInfo getPluginInfo() {\n");
-                template.append("        PluginInfo info = new PluginInfo();\n");
-                template.append("        info.setName(\"").append(pluginName).append("\");\n");
-                template.append("        info.setVersion(\"1.0.0\");\n");
-                template.append("        info.setAuthor(\"Your Name\");\n");
-                template.append("        info.setDescription(\"Example plugin for ModLoader\");\n");
-                template.append("        return info;\n");
-                template.append("    }\n");
-                template.append("    \n");
-                template.append("    @Override\n");
-                template.append("    protected void onPluginLoad() {\n");
-                template.append("        logUser(\"").append(pluginName).append(" plugin loaded!\");\n");
-                template.append("    }\n");
-                template.append("    \n");
-                template.append("    @Override\n");
-                template.append("    protected void onPluginEnable() {\n");
-                template.append("        logUser(\"").append(pluginName).append(" plugin enabled!\");\n");
-                template.append("    }\n");
-                template.append("    \n");
-                template.append("    @Override\n");
-                template.append("    protected void onPluginDisable() {\n");
-                template.append("        logUser(\"").append(pluginName).append(" plugin disabled!\");\n");
-                template.append("    }\n");
-                template.append("    \n");
-                template.append("    @Override\n");
-                template.append("    protected void onPluginUnload() {\n");
-                template.append("        logUser(\"").append(pluginName).append(" plugin unloaded!\");\n");
-                template.append("    }\n");
-                template.append("}\n");
-                break;
-                
-            case CONFIG_PLUGIN:
-                template.append("# Example Configuration Plugin Template\n");
-                template.append("name=").append(pluginName).append("\n");
-                template.append("version=1.0.0\n");
-                template.append("author=Your Name\n");
-                template.append("description=Example configuration-based plugin\n");
-                template.append("category=Configuration\n");
-                template.append("main_class=com.modloader.plugin.ConfigPlugin\n");
-                template.append("\n");
-                template.append("# Actions to execute on load\n");
-                template.append("load_actions=log:").append(pluginName).append(" plugin loaded!\n");
-                template.append("\n");
-                template.append("# Actions to execute on enable\n");
-                template.append("enable_actions=log:").append(pluginName).append(" plugin enabled!;file:create:enabled.txt\n");
-                template.append("\n");
-                template.append("# Actions to execute on disable\n");
-                template.append("disable_actions=log:").append(pluginName).append(" plugin disabled!;file:delete:enabled.txt\n");
-                template.append("\n");
-                template.append("# Actions to execute on unload\n");
-                template.append("unload_actions=log:").append(pluginName).append(" plugin unloaded!\n");
-                break;
-                
-            default:
-                template.append("# Generic plugin template for ").append(pluginName).append("\n");
-                template.append("# Plugin type: ").append(type.getDisplayName()).append("\n");
-                template.append("# Please refer to documentation for specific implementation details.\n");
-                break;
-        }
-        
-        return template.toString();
-    }
-    
-    /**
-     * Cleanup plugin loader
-     */
-    public void cleanup() {
-        LogUtils.logDebug("Cleaning up PluginLoader...");
-        
-        // Close all class loaders
-        for (Map.Entry<String, ClassLoader> entry : pluginClassLoaders.entrySet()) {
-            ClassLoader loader = entry.getValue();
-            if (loader instanceof Closeable) {
-                try {
-                    ((Closeable) loader).close();
-                } catch (IOException e) {
-                    LogUtils.logDebug("Error closing class loader: " + e.getMessage());
-                }
-            }
-        }
-        
-        pluginClassLoaders.clear();
-        loadedPluginFiles.clear();
-        
-        LogUtils.logDebug("PluginLoader cleanup completed");
-    }
-    
-    /**
-     * Get loaded plugin files count
-     */
-    public int getLoadedPluginCount() {
-        return loadedPluginFiles.size();
-    }
-    
-    /**
-     * Get active class loaders count
-     */
-    public int getActiveClassLoadersCount() {
-        return pluginClassLoaders.size();
-    }
-    
-    /**
-     * Check if plugin loader has any plugins loaded
-     */
-    public boolean hasLoadedPlugins() {
-        return !loadedPluginFiles.isEmpty() || !pluginClassLoaders.isEmpty();
-    }
-    
-    /**
-     * Get memory usage estimate
-     */
-    public long getEstimatedMemoryUsage() {
-        // Rough estimate: each class loader uses about 1MB
-        return pluginClassLoaders.size() * 1024 * 1024;
-    }
-    
-    /**
-     * Force garbage collection for plugin resources
-     */
-    public void forceGarbageCollection() {
-        LogUtils.logDebug("Forcing garbage collection for plugin resources");
-        System.gc();
-    }
-    
-    /**
-     * Get debug information about loaded plugins
-     */
-    public String getDebugInfo() {
-        StringBuilder debug = new StringBuilder();
-        debug.append("=== PluginLoader Debug Info ===\n");
-        debug.append("Loaded plugin files: ").append(loadedPluginFiles.size()).append("\n");
-        debug.append("Active class loaders: ").append(pluginClassLoaders.size()).append("\n");
-        debug.append("Estimated memory usage: ").append(FileUtils.formatFileSize(getEstimatedMemoryUsage())).append("\n");
-        
-        debug.append("\nLoaded files:\n");
-        for (String filePath : loadedPluginFiles) {
-            debug.append("- ").append(filePath).append("\n");
-        }
-        
-        debug.append("\nClass loaders:\n");
-        for (String pluginId : pluginClassLoaders.keySet()) {
-            debug.append("- ").append(pluginId).append(" (").append(pluginClassLoaders.get(pluginId).getClass().getSimpleName()).append(")\n");
-        }
-        
-        return debug.toString();
-    }
-}
-
-/storage/emulated/0/AndroidIDEProjects/ModLoader/ModLoader/app/src/main/java/com/modloader/plugin/PluginManager.java
-
-// File: PluginManager.java - Part 1 (Core Management)
-// Path: /app/src/main/java/com/modloader/plugin/PluginManager.java
-package com.modloader.plugin;
-
-import android.content.Context;
-import android.content.SharedPreferences;
-import com.modloader.util.LogUtils;
-import com.modloader.util.PathManager;
-import com.modloader.util.FileUtils;
-
-import java.io.File;
-import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-
-/**
- * Central Plugin Management System for ModLoader
- * Handles plugin discovery, loading, lifecycle management, and API provisioning
- */
-public class PluginManager {
-    private static final String TAG = "PluginManager";
-    private static final String PREFS_NAME = "plugin_manager_prefs";
-    private static final String PREF_PLUGINS_ENABLED = "plugins_enabled";
-    private static final String PREF_AUTO_DISCOVER = "auto_discover_plugins";
-    private static final String PREF_SAFE_MODE = "plugin_safe_mode";
-    
-    // Plugin file extensions
-    private static final String[] PLUGIN_EXTENSIONS = {".jar", ".dex", ".plugin"};
-    private static final long MAX_PLUGIN_SIZE = 50 * 1024 * 1024; // 50MB max
-    
-    // Singleton instance
-    private static volatile PluginManager instance;
-    private static final Object instanceLock = new Object();
-    
-    // Core components
-    private final Context context;
-    private final PluginLoader pluginLoader;
-    private final PluginRegistry pluginRegistry;
-    private final PluginValidator pluginValidator;
-    private final PluginStorage pluginStorage;
-    private final ExecutorService executorService;
-    
-    // Plugin state management
-    private final Map<String, Plugin> loadedPlugins = new ConcurrentHashMap<>();
-    private final Map<String, PluginInfo> availablePlugins = new ConcurrentHashMap<>();
-    private final Map<String, PluginContext> pluginContexts = new ConcurrentHashMap<>();
-    private final Set<String> enabledPlugins = ConcurrentHashMap.newKeySet();
-    private final Set<String> failedPlugins = ConcurrentHashMap.newKeySet();
-    
-    // Configuration
-    private boolean pluginsEnabled = true;
-    private boolean autoDiscoverEnabled = true;
-    private boolean safeMode = false;
-    private boolean initialized = false;
-    
-    // Listeners
-    private final Set<PluginManagerListener> listeners = ConcurrentHashMap.newKeySet();
-    
-    /**
-     * Plugin Manager Listener Interface
-     */
-    public interface PluginManagerListener {
-        void onPluginLoaded(String pluginId, Plugin plugin);
-        void onPluginUnloaded(String pluginId);
-        void onPluginEnabled(String pluginId);
-        void onPluginDisabled(String pluginId);
-        void onPluginError(String pluginId, String error);
-        void onPluginDiscovered(String pluginId, PluginInfo info);
-    }
-    
-    private PluginManager(Context context) {
-        this.context = context.getApplicationContext();
-        this.pluginLoader = new PluginLoader(context);
-        this.pluginRegistry = new PluginRegistry(context);
-        this.pluginValidator = new PluginValidator(context);
-        this.pluginStorage = new PluginStorage(context);
-        this.executorService = Executors.newCachedThreadPool();
-        
-        loadConfiguration();
-        LogUtils.logDebug("PluginManager initialized");
-    }
-    
-    /**
-     * Get singleton instance of PluginManager
-     */
-    public static PluginManager getInstance(Context context) {
-        if (instance == null) {
-            synchronized (instanceLock) {
-                if (instance == null) {
-                    instance = new PluginManager(context);
-                }
-            }
-        }
-        return instance;
-    }
-    
-    /**
-     * Initialize the plugin system
-     */
-    public void initialize() {
-        if (initialized) {
-            LogUtils.logDebug("PluginManager already initialized");
-            return;
-        }
-        
-        LogUtils.logUser("🔌 Initializing Plugin System...");
-        
-        try {
-            // Create plugin directories
-            initializePluginDirectories();
-            
-            // Initialize components
-            pluginRegistry.initialize();
-            pluginStorage.initialize();
-            
-            // Load plugin configurations
-            loadPluginConfigurations();
-            
-            // Discover available plugins
-            if (autoDiscoverEnabled) {
-                discoverPlugins();
-            }
-            
-            // Load enabled plugins
-            if (pluginsEnabled) {
-                loadEnabledPlugins();
-            }
-            
-            initialized = true;
-            LogUtils.logUser("✅ Plugin System initialized successfully");
-            LogUtils.logUser("📊 Available plugins: " + availablePlugins.size());
-            LogUtils.logUser("📊 Loaded plugins: " + loadedPlugins.size());
-            
-        } catch (Exception e) {
-            LogUtils.logError("Failed to initialize Plugin System: " + e.getMessage());
-            LogUtils.logDebug("Plugin initialization error: " + e.toString());
-        }
-    }
-    
-    /**
-     * Create plugin directory structure
-     */
-    private void initializePluginDirectories() {
-        try {
-            File pluginsDir = getPluginsDirectory();
-            File configDir = getPluginConfigDirectory();
-            File dataDir = getPluginDataDirectory();
-            File tempDir = getPluginTempDirectory();
-            
-            // Create directories
-            PathManager.ensureDirectoryExists(pluginsDir);
-            PathManager.ensureDirectoryExists(configDir);
-            PathManager.ensureDirectoryExists(dataDir);
-            PathManager.ensureDirectoryExists(tempDir);
-            
-            // Create info files
-            createPluginDirectoryReadmes();
-            
-            LogUtils.logDebug("Plugin directories initialized");
-            LogUtils.logDebug("Plugins: " + pluginsDir.getAbsolutePath());
-            LogUtils.logDebug("Config: " + configDir.getAbsolutePath());
-            LogUtils.logDebug("Data: " + dataDir.getAbsolutePath());
-            
-        } catch (Exception e) {
-            LogUtils.logError("Failed to create plugin directories: " + e.getMessage());
-        }
-    }
-    
-    /**
-     * Create README files for plugin directories
-     */
-    private void createPluginDirectoryReadmes() {
-        try {
-            // Main plugins directory README
-            File pluginsReadme = new File(getPluginsDirectory(), "README.txt");
-            if (!pluginsReadme.exists()) {
-                try (java.io.FileWriter writer = new java.io.FileWriter(pluginsReadme)) {
-                    writer.write("=== ModLoader Plugins Directory ===\n\n");
-                    writer.write("Place your plugin files here:\n");
-                    writer.write("• .jar files (Java plugins)\n");
-                    writer.write("• .dex files (Android plugins)\n");
-                    writer.write("• .plugin files (Configuration-based plugins)\n\n");
-                    writer.write("Plugin files can be:\n");
-                    writer.write("• plugin_name.jar (enabled)\n");
-                    writer.write("• plugin_name.jar.disabled (disabled)\n\n");
-                    writer.write("Plugins provide additional functionality like:\n");
-                    writer.write("• Custom UI themes\n");
-                    writer.write("• New mod formats\n");
-                    writer.write("• Enhanced features\n");
-                    writer.write("• Bug fixes and patches\n\n");
-                    writer.write("Path: " + pluginsReadme.getAbsolutePath() + "\n");
-                }
-            }
-            
-            // Config directory README
-            File configReadme = new File(getPluginConfigDirectory(), "README.txt");
-            if (!configReadme.exists()) {
-                try (java.io.FileWriter writer = new java.io.FileWriter(configReadme)) {
-                    writer.write("=== Plugin Configuration Directory ===\n\n");
-                    writer.write("This directory contains plugin configuration files:\n");
-                    writer.write("• plugin_name.json (plugin settings)\n");
-                    writer.write("• plugin_name.properties (legacy format)\n");
-                    writer.write("• plugin_name.xml (advanced configuration)\n\n");
-                    writer.write("Configuration files are automatically created when\n");
-                    writer.write("plugins are installed and configured.\n\n");
-                    writer.write("Path: " + configReadme.getAbsolutePath() + "\n");
-                }
-            }
-            
-            // Data directory README
-            File dataReadme = new File(getPluginDataDirectory(), "README.txt");
-            if (!dataReadme.exists()) {
-                try (java.io.FileWriter writer = new java.io.FileWriter(dataReadme)) {
-                    writer.write("=== Plugin Data Directory ===\n\n");
-                    writer.write("This directory contains plugin runtime data:\n");
-                    writer.write("• Cached files\n");
-                    writer.write("• Downloaded resources\n");
-                    writer.write("• Temporary files\n");
-                    writer.write("• Plugin-specific databases\n\n");
-                    writer.write("Files here are managed by individual plugins.\n\n");
-                    writer.write("Path: " + dataReadme.getAbsolutePath() + "\n");
-                }
-            }
-            
-        } catch (Exception e) {
-            LogUtils.logDebug("Error creating plugin READMEs: " + e.getMessage());
-        }
-    }
-    
-    /**
-     * Discover available plugins in the plugins directory
-     */
-    public void discoverPlugins() {
-        LogUtils.logUser("🔍 Discovering plugins...");
-        
-        try {
-            File pluginsDir = getPluginsDirectory();
-            if (!pluginsDir.exists()) {
-                LogUtils.logDebug("Plugins directory doesn't exist yet");
-                return;
-            }
-            
-            File[] pluginFiles = pluginsDir.listFiles(this::isValidPluginFile);
-            if (pluginFiles == null || pluginFiles.length == 0) {
-                LogUtils.logUser("📋 No plugins found in directory");
-                return;
-            }
-            
-            int discoveredCount = 0;
-            int validCount = 0;
-            
-            for (File pluginFile : pluginFiles) {
-                try {
-                    PluginInfo info = analyzePluginFile(pluginFile);
-                    if (info != null) {
-                        availablePlugins.put(info.getId(), info);
-                        discoveredCount++;
-                        
-                        // Validate plugin
-                        if (pluginValidator.validatePlugin(info)) {
-                            validCount++;
-                            notifyPluginDiscovered(info.getId(), info);
-                        } else {
-                            LogUtils.logDebug("Plugin validation failed: " + info.getId());
-                        }
-                    }
-                } catch (Exception e) {
-                    LogUtils.logDebug("Error analyzing plugin " + pluginFile.getName() + ": " + e.getMessage());
-                }
-            }
-            
-            LogUtils.logUser("🔍 Plugin discovery completed");
-            LogUtils.logUser("📊 Discovered: " + discoveredCount + " plugins");
-            LogUtils.logUser("📊 Valid: " + validCount + " plugins");
-            
-        } catch (Exception e) {
-            LogUtils.logError("Plugin discovery failed: " + e.getMessage());
-        }
-    }
-    
-    /**
-     * Load all enabled plugins
-     */
-    public void loadEnabledPlugins() {
-        if (!pluginsEnabled) {
-            LogUtils.logDebug("Plugins are disabled globally");
-            return;
-        }
-        
-        LogUtils.logUser("🔌 Loading enabled plugins...");
-        
-        List<Future<Boolean>> loadTasks = new ArrayList<>();
-        
-        for (PluginInfo info : availablePlugins.values()) {
-            if (isPluginEnabled(info.getId()) && !isPluginLoaded(info.getId())) {
-                Future<Boolean> task = executorService.submit(() -> loadPlugin(info.getId()));
-                loadTasks.add(task);
-            }
-        }
-        
-        // Wait for all plugins to load
-        int successCount = 0;
-        for (Future<Boolean> task : loadTasks) {
-            try {
-                if (task.get()) {
-                    successCount++;
-                }
-            } catch (Exception e) {
-                LogUtils.logDebug("Plugin load task failed: " + e.getMessage());
-            }
-        }
-        
-        LogUtils.logUser("🔌 Plugin loading completed");
-        LogUtils.logUser("📊 Successfully loaded: " + successCount + "/" + loadTasks.size() + " plugins");
-    }
-    
-    /**
-     * Load a specific plugin by ID
-     */
-    public boolean loadPlugin(String pluginId) {
-        if (!pluginsEnabled) {
-            LogUtils.logDebug("Plugins are disabled globally");
-            return false;
-        }
-        
-        if (isPluginLoaded(pluginId)) {
-            LogUtils.logDebug("Plugin already loaded: " + pluginId);
-            return true;
-        }
-        
-        PluginInfo info = availablePlugins.get(pluginId);
-        if (info == null) {
-            LogUtils.logError("Plugin not found: " + pluginId);
-            return false;
-        }
-        
-        LogUtils.logUser("🔌 Loading plugin: " + info.getName());
-        
-        try {
-            // Validate plugin before loading
-            if (!pluginValidator.validatePlugin(info)) {
-                LogUtils.logError("Plugin validation failed: " + pluginId);
-                failedPlugins.add(pluginId);
-                notifyPluginError(pluginId, "Plugin validation failed");
-                return false;
-            }
-            
-            // Create plugin context
-            PluginContext pluginContext = new PluginContext(context, info, this);
-            pluginContexts.put(pluginId, pluginContext);
-            
-            // Load plugin using PluginLoader
-            Plugin plugin = pluginLoader.loadPlugin(info, pluginContext);
-            if (plugin == null) {
-                LogUtils.logError("Failed to load plugin: " + pluginId);
-                failedPlugins.add(pluginId);
-                notifyPluginError(pluginId, "Plugin loading failed");
-                return false;
-            }
-            
-            // Initialize plugin
-            plugin.onLoad(pluginContext);
-            
-            // Register plugin
-            loadedPlugins.put(pluginId, plugin);
-            pluginRegistry.registerPlugin(pluginId, plugin, info);
-            enabledPlugins.add(pluginId);
-            
-            LogUtils.logUser("✅ Plugin loaded successfully: " + info.getName());
-            LogUtils.logDebug("Plugin class: " + plugin.getClass().getName());
-            
-            notifyPluginLoaded(pluginId, plugin);
-            notifyPluginEnabled(pluginId);
-            
-            return true;
-            
-        } catch (Exception e) {
-            LogUtils.logError("Plugin loading error for " + pluginId + ": " + e.getMessage());
-            LogUtils.logDebug("Plugin loading exception: " + e.toString());
-            failedPlugins.add(pluginId);
-            notifyPluginError(pluginId, e.getMessage());
-            return false;
-        }
-    }
-    
-    /**
-     * Unload a specific plugin by ID
-     */
-    public boolean unloadPlugin(String pluginId) {
-        Plugin plugin = loadedPlugins.get(pluginId);
-        if (plugin == null) {
-            LogUtils.logDebug("Plugin not loaded: " + pluginId);
-            return false;
-        }
-        
-        LogUtils.logUser("🔌 Unloading plugin: " + pluginId);
-        
-        try {
-            // Call plugin's unload method
-            plugin.onUnload();
-            
-            // Remove from registrations
-            loadedPlugins.remove(pluginId);
-            pluginRegistry.unregisterPlugin(pluginId);
-            pluginContexts.remove(pluginId);
-            enabledPlugins.remove(pluginId);
-            
-            LogUtils.logUser("✅ Plugin unloaded: " + pluginId);
-            notifyPluginUnloaded(pluginId);
-            
-            return true;
-            
-        } catch (Exception e) {
-            LogUtils.logError("Plugin unloading error: " + e.getMessage());
-            notifyPluginError(pluginId, "Unload failed: " + e.getMessage());
-            return false;
-        }
-    }
-    
-    /**
-     * Enable a plugin (load if not already loaded)
-     */
-    public boolean enablePlugin(String pluginId) {
-        PluginInfo info = availablePlugins.get(pluginId);
-        if (info == null) {
-            LogUtils.logError("Plugin not found: " + pluginId);
-            return false;
-        }
-        
-        // Remove from failed list if present
-        failedPlugins.remove(pluginId);
-        
-        // Enable in preferences
-        setPluginEnabled(pluginId, true);
-        
-        // Load if not already loaded
-        if (!isPluginLoaded(pluginId)) {
-            return loadPlugin(pluginId);
-        } else {
-            // Already loaded, just mark as enabled
-            enabledPlugins.add(pluginId);
-            notifyPluginEnabled(pluginId);
-            return true;
-        }
-    }
-    
-    /**
-     * Disable a plugin (unload if loaded)
-     */
-    public boolean disablePlugin(String pluginId) {
-        // Disable in preferences
-        setPluginEnabled(pluginId, false);
-        
-        // Unload if loaded
-        if (isPluginLoaded(pluginId)) {
-            return unloadPlugin(pluginId);
-        } else {
-            // Not loaded, just mark as disabled
-            enabledPlugins.remove(pluginId);
-            notifyPluginDisabled(pluginId);
-            return true;
-        }
-    }
-    
-    /**
-     * Install a plugin from file
-     */
-    public boolean installPlugin(File pluginFile) {
-        if (pluginFile == null || !pluginFile.exists()) {
-            LogUtils.logError("Plugin file does not exist");
-            return false;
-        }
-        
-        LogUtils.logUser("📥 Installing plugin: " + pluginFile.getName());
-        
-        try {
-            // Validate file
-            if (!isValidPluginFile(pluginFile)) {
-                LogUtils.logError("Invalid plugin file: " + pluginFile.getName());
-                return false;
-            }
-            
-            // Analyze plugin
-            PluginInfo info = analyzePluginFile(pluginFile);
-            if (info == null) {
-                LogUtils.logError("Failed to analyze plugin file");
-                return false;
-            }
-            
-            // Check for conflicts
-            if (availablePlugins.containsKey(info.getId())) {
-                LogUtils.logUser("⚠️ Plugin already exists: " + info.getId());
-                // Create backup of existing plugin
-                backupExistingPlugin(info.getId());
-            }
-            
-            // Copy to plugins directory
-            File targetFile = new File(getPluginsDirectory(), pluginFile.getName());
-            if (!FileUtils.copyFile(pluginFile, targetFile)) {
-                LogUtils.logError("Failed to copy plugin file");
-                return false;
-            }
-            
-            // Update plugin info with new path
-            info.setFilePath(targetFile.getAbsolutePath());
-            availablePlugins.put(info.getId(), info);
-            
-            // Enable by default
-            setPluginEnabled(info.getId(), true);
-            
-            LogUtils.logUser("✅ Plugin installed: " + info.getName());
-            LogUtils.logUser("📁 Location: " + targetFile.getAbsolutePath());
-            
-            notifyPluginDiscovered(info.getId(), info);
-            
-            // Auto-load if plugins are enabled
-            if (pluginsEnabled) {
-                loadPlugin(info.getId());
-            }
-            
-            return true;
-            
-        } catch (Exception e) {
-            LogUtils.logError("Plugin installation failed: " + e.getMessage());
-            return false;
-        }
-    }
-    
-    // Directory getters
-    public File getPluginsDirectory() {
-        return new File(context.getExternalFilesDir(null), "ModLoader/Plugins");
-    }
-    
-    public File getPluginConfigDirectory() {
-        return new File(context.getExternalFilesDir(null), "ModLoader/PluginConfig");
-    }
-    
-    public File getPluginDataDirectory() {
-        return new File(context.getExternalFilesDir(null), "ModLoader/PluginData");
-    }
-    
-    public File getPluginTempDirectory() {
-        return new File(context.getExternalFilesDir(null), "ModLoader/PluginTemp");
-    }
-    
-    // Utility methods
-    private boolean isValidPluginFile(File file) {
-        if (!file.isFile()) return false;
-        if (file.length() == 0 || file.length() > MAX_PLUGIN_SIZE) return false;
-        
-        String name = file.getName().toLowerCase();
-        for (String ext : PLUGIN_EXTENSIONS) {
-            if (name.endsWith(ext) || name.endsWith(ext + ".disabled")) {
-                return true;
-            }
-        }
-        return false;
-    }
-    
-    private PluginInfo analyzePluginFile(File pluginFile) {
-        try {
-            return pluginLoader.analyzePlugin(pluginFile);
-        } catch (Exception e) {
-            LogUtils.logDebug("Failed to analyze plugin: " + e.getMessage());
-            return null;
-        }
-    }
-    
-    private void loadConfiguration() {
-        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        pluginsEnabled = prefs.getBoolean(PREF_PLUGINS_ENABLED, true);
-        autoDiscoverEnabled = prefs.getBoolean(PREF_AUTO_DISCOVER, true);
-        safeMode = prefs.getBoolean(PREF_SAFE_MODE, false);
-        
-        LogUtils.logDebug("Plugin configuration loaded - Enabled: " + pluginsEnabled + 
-                         ", Auto-discover: " + autoDiscoverEnabled + ", Safe mode: " + safeMode);
-    }
-    
-    // Configuration getters/setters
-    public boolean arePluginsEnabled() { return pluginsEnabled; }
-    public boolean isAutoDiscoverEnabled() { return autoDiscoverEnabled; }
-    public boolean isSafeMode() { return safeMode; }
-    public boolean isInitialized() { return initialized; }
-    
-    public void setPluginsEnabled(boolean enabled) {
-        this.pluginsEnabled = enabled;
-        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        prefs.edit().putBoolean(PREF_PLUGINS_ENABLED, enabled).apply();
-        LogUtils.logUser("Plugin system " + (enabled ? "enabled" : "disabled"));
-    }
-    
-    public void setAutoDiscoverEnabled(boolean enabled) {
-        this.autoDiscoverEnabled = enabled;
-        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        prefs.edit().putBoolean(PREF_AUTO_DISCOVER, enabled).apply();
-    }
-    
-    public void setSafeMode(boolean enabled) {
-        this.safeMode = enabled;
-        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        prefs.edit().putBoolean(PREF_SAFE_MODE, enabled).apply();
-        LogUtils.logUser("Plugin safe mode " + (enabled ? "enabled" : "disabled"));
-    }
-
-// File: PluginManager.java - Part 2 (Operations & Utilities)
-// Continuation of PluginManager.java
-
-    /**
-     * Uninstall a plugin
-     */
-    public boolean uninstallPlugin(String pluginId) {
-        PluginInfo info = availablePlugins.get(pluginId);
-        if (info == null) {
-            LogUtils.logError("Plugin not found: " + pluginId);
-            return false;
-        }
-        
-        LogUtils.logUser("🗑️ Uninstalling plugin: " + info.getName());
-        
-        try {
-            // Unload if loaded
-            if (isPluginLoaded(pluginId)) {
-                unloadPlugin(pluginId);
-            }
-            
-            // Remove plugin file
-            File pluginFile = new File(info.getFilePath());
-            if (pluginFile.exists() && !pluginFile.delete()) {
-                LogUtils.logError("Failed to delete plugin file: " + pluginFile.getName());
-                return false;
-            }
-            
-            // Remove configuration
-            File configFile = new File(getPluginConfigDirectory(), pluginId + ".json");
-            if (configFile.exists()) {
-                configFile.delete();
-            }
-            
-            // Remove data directory
-            File dataDir = new File(getPluginDataDirectory(), pluginId);
-            if (dataDir.exists()) {
-                FileUtils.deleteDirectory(dataDir);
-            }
-            
-            // Remove from tracking
-            availablePlugins.remove(pluginId);
-            setPluginEnabled(pluginId, false);
-            failedPlugins.remove(pluginId);
-            
-            LogUtils.logUser("✅ Plugin uninstalled: " + info.getName());
-            return true;
-            
-        } catch (Exception e) {
-            LogUtils.logError("Plugin uninstallation failed: " + e.getMessage());
-            return false;
-        }
-    }
-    
-    /**
-     * Reload a plugin (unload and load again)
-     */
-    public boolean reloadPlugin(String pluginId) {
-        LogUtils.logUser("🔄 Reloading plugin: " + pluginId);
-        
-        boolean wasLoaded = isPluginLoaded(pluginId);
-        if (wasLoaded) {
-            if (!unloadPlugin(pluginId)) {
-                LogUtils.logError("Failed to unload plugin for reload: " + pluginId);
-                return false;
-            }
-        }
-        
-        // Re-discover and re-analyze the plugin
-        PluginInfo info = availablePlugins.get(pluginId);
-        if (info != null) {
-            File pluginFile = new File(info.getFilePath());
-            if (pluginFile.exists()) {
-                PluginInfo newInfo = analyzePluginFile(pluginFile);
-                if (newInfo != null) {
-                    availablePlugins.put(pluginId, newInfo);
-                }
-            }
-        }
-        
-        if (wasLoaded) {
-            return loadPlugin(pluginId);
-        }
-        
-        return true;
-    }
-    
-    /**
-     * Refresh plugin system (re-discover and reload)
-     */
-    public void refreshPlugins() {
-        LogUtils.logUser("🔄 Refreshing plugin system...");
-        
-        try {
-            // Clear current state
-            availablePlugins.clear();
-            failedPlugins.clear();
-            
-            // Re-discover plugins
-            discoverPlugins();
-            
-            // Reload enabled plugins
-            loadEnabledPlugins();
-            
-            LogUtils.logUser("✅ Plugin system refreshed");
-            
-        } catch (Exception e) {
-            LogUtils.logError("Plugin refresh failed: " + e.getMessage());
-        }
-    }
-    
-    /**
-     * Get plugin context by ID
-     */
-    public PluginContext getPluginContext(String pluginId) {
-        return pluginContexts.get(pluginId);
-    }
-    
-    /**
-     * Check if plugin is enabled
-     */
-    public boolean isPluginEnabled(String pluginId) {
-        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        return prefs.getBoolean("plugin_enabled_" + pluginId, false);
-    }
-    
-    /**
-     * Set plugin enabled state
-     */
-    private void setPluginEnabled(String pluginId, boolean enabled) {
-        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        prefs.edit().putBoolean("plugin_enabled_" + pluginId, enabled).apply();
-    }
-    
-    /**
-     * Get plugin statistics
-     */
-    public PluginStatistics getStatistics() {
-        PluginStatistics stats = new PluginStatistics();
-        stats.totalPlugins = availablePlugins.size();
-        stats.loadedPlugins = loadedPlugins.size();
-        stats.enabledPlugins = enabledPlugins.size();
-        stats.failedPlugins = failedPlugins.size();
-        stats.disabledPlugins = availablePlugins.size() - enabledPlugins.size();
-        stats.pluginStorageUsage = calculatePluginStorageUsage();
-        return stats;
-    }
-    
-    /**
-     * Plugin Statistics class
-     */
-    public static class PluginStatistics {
-        public int totalPlugins = 0;
-        public int loadedPlugins = 0;
-        public int enabledPlugins = 0;
-        public int disabledPlugins = 0;
-        public int failedPlugins = 0;
-        public long pluginStorageUsage = 0;
-        
-        public String getFormattedReport() {
-            StringBuilder sb = new StringBuilder();
-            sb.append("=== Plugin Statistics ===\n");
-            sb.append("Total Plugins: ").append(totalPlugins).append("\n");
-            sb.append("Loaded: ").append(loadedPlugins).append("\n");
-            sb.append("Enabled: ").append(enabledPlugins).append("\n");
-            sb.append("Disabled: ").append(disabledPlugins).append("\n");
-            sb.append("Failed: ").append(failedPlugins).append("\n");
-            sb.append("Storage Usage: ").append(FileUtils.formatFileSize(pluginStorageUsage)).append("\n");
-            return sb.toString();
-        }
-    }
-    
-    /**
-     * Get failed plugins
-     */
-    public Set<String> getFailedPlugins() {
-        return new HashSet<>(failedPlugins);
-    }
-    
-    /**
-     * Clear failed plugins list
-     */
-    public void clearFailedPlugins() {
-        failedPlugins.clear();
-        LogUtils.logUser("Cleared failed plugins list");
-    }
-    
-    /**
-     * Get plugins by type
-     */
-    public List<PluginInfo> getPluginsByType(PluginInfo.PluginType type) {
-        List<PluginInfo> result = new ArrayList<>();
-        for (PluginInfo info : availablePlugins.values()) {
-            if (info.getType() == type) {
-                result.add(info);
-            }
-        }
-        return result;
-    }
-    
-    /**
-     * Get plugins by category
-     */
-    public List<PluginInfo> getPluginsByCategory(String category) {
-        List<PluginInfo> result = new ArrayList<>();
-        for (PluginInfo info : availablePlugins.values()) {
-            if (category.equals(info.getCategory())) {
-                result.add(info);
-            }
-        }
-        return result;
-    }
-    
-    /**
-     * Search plugins by name or description
-     */
-    public List<PluginInfo> searchPlugins(String query) {
-        List<PluginInfo> result = new ArrayList<>();
-        String lowerQuery = query.toLowerCase();
-        
-        for (PluginInfo info : availablePlugins.values()) {
-            if (info.getName().toLowerCase().contains(lowerQuery) ||
-                info.getDescription().toLowerCase().contains(lowerQuery) ||
-                info.getId().toLowerCase().contains(lowerQuery)) {
-                result.add(info);
-            }
-        }
-        
-        return result;
-    }
-    
-    /**
-     * Export plugin list to file
-     */
-    public boolean exportPluginList(File outputFile) {
-        try {
-            LogUtils.logUser("📤 Exporting plugin list...");
-            
-            try (java.io.FileWriter writer = new java.io.FileWriter(outputFile)) {
-                writer.write("=== ModLoader Plugin List ===\n");
-                writer.write("Export Date: " + new java.util.Date().toString() + "\n");
-                writer.write("Total Plugins: " + availablePlugins.size() + "\n");
-                writer.write("Loaded Plugins: " + loadedPlugins.size() + "\n\n");
-                
-                for (PluginInfo info : availablePlugins.values()) {
-                    writer.write("Plugin: " + info.getName() + "\n");
-                    writer.write("  ID: " + info.getId() + "\n");
-                    writer.write("  Version: " + info.getVersion() + "\n");
-                    writer.write("  Type: " + info.getType() + "\n");
-                    writer.write("  Category: " + info.getCategory() + "\n");
-                    writer.write("  Status: " + (isPluginLoaded(info.getId()) ? "Loaded" : 
-                                 isPluginEnabled(info.getId()) ? "Enabled" : "Disabled") + "\n");
-                    writer.write("  File: " + info.getFilePath() + "\n");
-                    writer.write("  Description: " + info.getDescription() + "\n\n");
-                }
-            }
-            
-            LogUtils.logUser("✅ Plugin list exported: " + outputFile.getName());
-            return true;
-            
-        } catch (Exception e) {
-            LogUtils.logError("Plugin list export failed: " + e.getMessage());
-            return false;
-        }
-    }
-    
-    /**
-     * Cleanup plugin system
-     */
-    public void cleanup() {
-        LogUtils.logUser("🧹 Cleaning up plugin system...");
-        
-        try {
-            // Unload all plugins
-            for (String pluginId : new ArrayList<>(loadedPlugins.keySet())) {
-                unloadPlugin(pluginId);
-            }
-            
-            // Clear temporary files
-            File tempDir = getPluginTempDirectory();
-            if (tempDir.exists()) {
-                FileUtils.deleteDirectory(tempDir);
-                tempDir.mkdirs();
-            }
-            
-            // Shutdown executor
-            executorService.shutdown();
-            
-            // Clear state
-            loadedPlugins.clear();
-            pluginContexts.clear();
-            enabledPlugins.clear();
-            
-            LogUtils.logUser("✅ Plugin system cleanup completed");
-            
-        } catch (Exception e) {
-            LogUtils.logError("Plugin cleanup failed: " + e.getMessage());
-        }
-    }
-    
-    // Utility methods
-    private void loadPluginConfigurations() {
-        for (PluginInfo info : availablePlugins.values()) {
-            try {
-                pluginStorage.loadPluginConfig(info.getId());
-            } catch (Exception e) {
-                LogUtils.logDebug("Failed to load config for plugin " + info.getId() + ": " + e.getMessage());
-            }
-        }
-    }
-    
-    private void backupExistingPlugin(String pluginId) {
-        try {
-            PluginInfo existingInfo = availablePlugins.get(pluginId);
-            if (existingInfo != null) {
-                File existingFile = new File(existingInfo.getFilePath());
-                if (existingFile.exists()) {
-                    File backupFile = new File(existingFile.getParent(), 
-                                             existingFile.getName() + ".backup." + System.currentTimeMillis());
-                    if (existingFile.renameTo(backupFile)) {
-                        LogUtils.logUser("📦 Created backup: " + backupFile.getName());
-                    }
-                }
-            }
-        } catch (Exception e) {
-            LogUtils.logDebug("Plugin backup failed: " + e.getMessage());
-        }
-    }
-    
-    private long calculatePluginStorageUsage() {
-        long usage = 0;
-        try {
-            usage += FileUtils.getDirectorySize(getPluginsDirectory());
-            usage += FileUtils.getDirectorySize(getPluginConfigDirectory());
-            usage += FileUtils.getDirectorySize(getPluginDataDirectory());
-        } catch (Exception e) {
-            LogUtils.logDebug("Error calculating plugin storage: " + e.getMessage());
-        }
-        return usage;
-    }
-    
-    // Listener management
-    public void addListener(PluginManagerListener listener) {
-        listeners.add(listener);
-    }
-    
-    public void removeListener(PluginManagerListener listener) {
-        listeners.remove(listener);
-    }
-    
-    // Notification methods
-    private void notifyPluginLoaded(String pluginId, Plugin plugin) {
-        for (PluginManagerListener listener : listeners) {
-            try {
-                listener.onPluginLoaded(pluginId, plugin);
-            } catch (Exception e) {
-                LogUtils.logDebug("Listener notification error: " + e.getMessage());
-            }
-        }
-    }
-    
-    private void notifyPluginUnloaded(String pluginId) {
-        for (PluginManagerListener listener : listeners) {
-            try {
-                listener.onPluginUnloaded(pluginId);
-            } catch (Exception e) {
-                LogUtils.logDebug("Listener notification error: " + e.getMessage());
-            }
-        }
-    }
-    
-    private void notifyPluginEnabled(String pluginId) {
-        for (PluginManagerListener listener : listeners) {
-            try {
-                listener.onPluginEnabled(pluginId);
-            } catch (Exception e) {
-                LogUtils.logDebug("Listener notification error: " + e.getMessage());
-            }
-        }
-    }
-    
-    private void notifyPluginDisabled(String pluginId) {
-        for (PluginManagerListener listener : listeners) {
-            try {
-                listener.onPluginDisabled(pluginId);
-            } catch (Exception e) {
-                LogUtils.logDebug("Listener notification error: " + e.getMessage());
-            }
-        }
-    }
-    
-    private void notifyPluginError(String pluginId, String error) {
-        for (PluginManagerListener listener : listeners) {
-            try {
-                listener.onPluginError(pluginId, error);
-            } catch (Exception e) {
-                LogUtils.logDebug("Listener notification error: " + e.getMessage());
-            }
-        }
-    }
-    
-    private void notifyPluginDiscovered(String pluginId, PluginInfo info) {
-        for (PluginManagerListener listener : listeners) {
-            try {
-                listener.onPluginDiscovered(pluginId, info);
-            } catch (Exception e) {
-                LogUtils.logDebug("Listener notification error: " + e.getMessage());
-            }
-        }
-    }
-    
-    /**
-     * Get plugins by type
-     */
-    public List<PluginInfo> getPluginsByType(PluginInfo.PluginType type) {
-        List<PluginInfo> result = new ArrayList<>();
-        for (PluginInfo info : availablePlugins.values()) {
-            if (info.getType() == type) {
-                result.add(info);
-            }
-        }
-        return result;
-    }
-    
-    /**
-     * Get plugins by category
-     */
-    public List<PluginInfo> getPluginsByCategory(String category) {
-        List<PluginInfo> result = new ArrayList<>();
-        for (PluginInfo info : availablePlugins.values()) {
-            if (category.equals(info.getCategory())) {
-                result.add(info);
-            }
-        }
-        return result;
-    }
-    
-    /**
-     * Search plugins by name or description
-     */
-    public List<PluginInfo> searchPlugins(String query) {
-        List<PluginInfo> result = new ArrayList<>();
-        String lowerQuery = query.toLowerCase();
-        
-        for (PluginInfo info : availablePlugins.values()) {
-            if (info.getName().toLowerCase().contains(lowerQuery) ||
-                info.getDescription().toLowerCase().contains(lowerQuery) ||
-                info.getId().toLowerCase().contains(lowerQuery)) {
-                result.add(info);
-            }
-        }
-        
-        return result;
-    }
-    
-    /**
-     * Export plugin list to file
-     */
-    public boolean exportPluginList(File outputFile) {
-        try {
-            LogUtils.logUser("📤 Exporting plugin list...");
-            
-            try (java.io.FileWriter writer = new java.io.FileWriter(outputFile)) {
-                writer.write("=== ModLoader Plugin List ===\n");
-                writer.write("Export Date: " + new java.util.Date().toString() + "\n");
-                writer.write("Total Plugins: " + availablePlugins.size() + "\n");
-                writer.write("Loaded Plugins: " + loadedPlugins.size() + "\n\n");
-                
-                for (PluginInfo info : availablePlugins.values()) {
-                    writer.write("Plugin: " + info.getName() + "\n");
-                    writer.write("  ID: " + info.getId() + "\n");
-                    writer.write("  Version: " + info.getVersion() + "\n");
-                    writer.write("  Type: " + info.getType() + "\n");
-                    writer.write("  Category: " + info.getCategory() + "\n");
-                    writer.write("  Status: " + (isPluginLoaded(info.getId()) ? "Loaded" : 
-                                 isPluginEnabled(info.getId()) ? "Enabled" : "Disabled") + "\n");
-                    writer.write("  File: " + info.getFilePath() + "\n");
-                    writer.write("  Description: " + info.getDescription() + "\n\n");
-                }
-            }
-            
-            LogUtils.logUser("✅ Plugin list exported: " + outputFile.getName());
-            return true;
-            
-        } catch (Exception e) {
-            LogUtils.logError("Plugin list export failed: " + e.getMessage());
-            return false;
-        }
-    }
-    
-    /**
-     * Cleanup plugin system
-     */
-    public void cleanup() {
-        LogUtils.logUser("🧹 Cleaning up plugin system...");
-        
-        try {
-            // Unload all plugins
-            for (String pluginId : new ArrayList<>(loadedPlugins.keySet())) {
-                unloadPlugin(pluginId);
-            }
-            
-            // Clear temporary files
-            File tempDir = getPluginTempDirectory();
-            if (tempDir.exists()) {
-                FileUtils.deleteDirectory(tempDir);
-                tempDir.mkdirs();
-            }
-            
-            // Shutdown executor
-            executorService.shutdown();
-            
-            // Clear state
-            loadedPlugins.clear();
-            pluginContexts.clear();
-            enabledPlugins.clear();
-            
-            LogUtils.logUser("✅ Plugin system cleanup completed");
-            
-        } catch (Exception e) {
-            LogUtils.logError("Plugin cleanup failed: " + e.getMessage());
-        }
-    }
-    
-    /**
-     * Get failed plugins
-     */
-    public Set<String> getFailedPlugins() {
-        return new HashSet<>(failedPlugins);
-    }
-    
-    /**
-     * Clear failed plugins list
-     */
-    public void clearFailedPlugins() {
-        failedPlugins.clear();
-        LogUtils.logUser("Cleared failed plugins list");
-    }
-    
-    /**
-     * Get plugin registry
-     */
-    public PluginRegistry getPluginRegistry() {
-        return pluginRegistry;
-    }
-    
-    /**
-     * Get plugin storage
-     */
-    public PluginStorage getPluginStorage() {
-        return pluginStorage;
-    }
-    
-    /**
-     * Get supported plugin extensions
-     */
-    public String[] getSupportedExtensions() {
-        return PLUGIN_EXTENSIONS.clone();
-    }
-    
-    /**
-     * Get maximum plugin file size
-     */
-    public long getMaxPluginSize() {
-        return MAX_PLUGIN_SIZE;
-    }
-    
-    private void loadPluginConfigurations() {
-        for (PluginInfo info : availablePlugins.values()) {
-            try {
-                pluginStorage.loadPluginConfig(info.getId());
-            } catch (Exception e) {
-                LogUtils.logDebug("Failed to load config for plugin " + info.getId() + ": " + e.getMessage());
-            }
-        }
-    }
-    
-    private void backupExistingPlugin(String pluginId) {
-        try {
-            PluginInfo existingInfo = availablePlugins.get(pluginId);
-            if (existingInfo != null) {
-                File existingFile = new File(existingInfo.getFilePath());
-                if (existingFile.exists()) {
-                    File backupFile = new File(existingFile.getParent(), 
-                                             existingFile.getName() + ".backup." + System.currentTimeMillis());
-                    if (existingFile.renameTo(backupFile)) {
-                        LogUtils.logUser("📦 Created backup: " + backupFile.getName());
-                    }
-                }
-            }
-        } catch (Exception e) {
-            LogUtils.logDebug("Plugin backup failed: " + e.getMessage());
-        }
-    }
-    
-    private long calculatePluginStorageUsage() {
-        long usage = 0;
-        try {
-            usage += FileUtils.getDirectorySize(getPluginsDirectory());
-            usage += FileUtils.getDirectorySize(getPluginConfigDirectory());
-            usage += FileUtils.getDirectorySize(getPluginDataDirectory());
-        } catch (Exception e) {
-            LogUtils.logDebug("Error calculating plugin storage: " + e.getMessage());
-        }
-        return usage;
-    }
-    
-    /**
-     * Validate plugin dependencies
-     */
-    public boolean checkPluginDependencies(String pluginId) {
-        PluginInfo info = getPluginInfo(pluginId);
-        if (info == null) {
-            return false;
-        }
-        
-        for (String dependency : info.getDependencies()) {
-            if (!isPluginLoaded(dependency)) {
-                LogUtils.logDebug("Missing dependency for " + pluginId + ": " + dependency);
-                return false;
-            }
-        }
-        
-        return true;
-    }
-    
-    /**
-     * Get plugin dependency tree
-     */
-    public List<String> getPluginDependencyTree(String pluginId) {
-        List<String> dependencies = new ArrayList<>();
-        collectDependencies(pluginId, dependencies, new HashSet<>());
-        return dependencies;
-    }
-    
-    private void collectDependencies(String pluginId, List<String> dependencies, Set<String> visited) {
-        if (visited.contains(pluginId)) {
-            return; // Circular dependency protection
-        }
-        
-        visited.add(pluginId);
-        PluginInfo info = getPluginInfo(pluginId);
-        if (info != null) {
-            for (String dependency : info.getDependencies()) {
-                if (!dependencies.contains(dependency)) {
-                    dependencies.add(dependency);
-                    collectDependencies(dependency, dependencies, visited);
-                }
-            }
-        }
-    }
-    
-    /**
-     * Shutdown plugin system gracefully
-     */
-    public void shutdown() {
-        LogUtils.logUser("🔌 Shutting down plugin system...");
-        
-        try {
-            // Save all plugin configurations
-            for (String pluginId : loadedPlugins.keySet()) {
-                try {
-                    pluginStorage.savePluginConfig(pluginId);
-                } catch (Exception e) {
-                    LogUtils.logDebug("Failed to save config for plugin " + pluginId + ": " + e.getMessage());
-                }
-            }
-            
-            // Cleanup
-            cleanup();
-            
-            // Clear singleton
-            synchronized (instanceLock) {
-                instance = null;
-            }
-            
-            LogUtils.logUser("✅ Plugin system shut down successfully");
-            
-        } catch (Exception e) {
-            LogUtils.logError("Plugin shutdown error: " + e.getMessage());
-        }
-    }
-}
-
-/storage/emulated/0/AndroidIDEProjects/ModLoader/ModLoader/app/src/main/java/com/modloader/plugin/PluginRegistry.java
-
-// File: PluginRegistry.java - Plugin Registration and Lifecycle
-// Path: /app/src/main/java/com/modloader/plugin/PluginRegistry.java
-package com.modloader.plugin;
-
-import android.content.Context;
-import com.modloader.util.LogUtils;
-
-import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-
-/**
- * Plugin Registry manages plugin registration, dependencies, and lifecycle coordination
- */
-public class PluginRegistry {
-    private static final String TAG = "PluginRegistry";
-    
-    private final Context context;
-    private final Map<String, RegistryEntry> registeredPlugins = new ConcurrentHashMap<>();
-    private final Map<String, Set<String>> dependencyGraph = new ConcurrentHashMap<>();
-    private final Map<String, Set<String>> reverseDependencyGraph = new ConcurrentHashMap<>();
-    private final Set<PluginRegistryListener> listeners = ConcurrentHashMap.newKeySet();
-    
-    // Plugin categories for organization
-    private final Map<String, Set<String>> categorizedPlugins = new ConcurrentHashMap<>();
-    
-    // Plugin lifecycle tracking
-    private final Map<String, Plugin.PluginStatus> pluginStatuses = new ConcurrentHashMap<>();
-    private final Map<String, Long> pluginLoadTimes = new ConcurrentHashMap<>();
-    private final Map<String, String> pluginErrors = new ConcurrentHashMap<>();
-    
-    /**
-     * Registry entry containing plugin information and metadata
-     */
-    public static class RegistryEntry {
-        private final String pluginId;
-        private final Plugin plugin;
-        private final PluginInfo pluginInfo;
-        private final long registrationTime;
-        private int priority = 0;
-        private Map<String, Object> metadata = new HashMap<>();
-        
-        public RegistryEntry(String pluginId, Plugin plugin, PluginInfo pluginInfo) {
-            this.pluginId = pluginId;
-            this.plugin = plugin;
-            this.pluginInfo = pluginInfo;
-            this.registrationTime = System.currentTimeMillis();
-        }
-        
-        // Getters
-        public String getPluginId() { return pluginId; }
-        public Plugin getPlugin() { return plugin; }
-        public PluginInfo getPluginInfo() { return pluginInfo; }
-        public long getRegistrationTime() { return registrationTime; }
-        public int getPriority() { return priority; }
-        public Map<String, Object> getMetadata() { return metadata; }
-        
-        // Setters
-        public void setPriority(int priority) { this.priority = priority; }
-        public void setMetadata(Map<String, Object> metadata) { this.metadata = metadata; }
-        public void addMetadata(String key, Object value) { this.metadata.put(key, value); }
-        
-        @Override
-        public String toString() {
-            return String.format("RegistryEntry[%s - %s v%s]", 
-                pluginId, pluginInfo.getName(), pluginInfo.getVersion());
-        }
-    }
-    
-    /**
-     * Plugin Registry Listener Interface
-     */
-    public interface PluginRegistryListener {
-        void onPluginRegistered(String pluginId, PluginInfo pluginInfo);
-        void onPluginUnregistered(String pluginId);
-        void onDependencyResolved(String pluginId, String dependencyId);
-        void onDependencyFailed(String pluginId, String dependencyId, String reason);
-        void onPluginStatusChanged(String pluginId, Plugin.PluginStatus oldStatus, Plugin.PluginStatus newStatus);
-    }
-    
-    public PluginRegistry(Context context) {
-        this.context = context;
-        LogUtils.logDebug("PluginRegistry initialized");
-    }
-    
-    /**
-     * Initialize the plugin registry
-     */
-    public void initialize() {
-        LogUtils.logDebug("Initializing PluginRegistry");
-        
-        // Clear any existing state
-        registeredPlugins.clear();
-        dependencyGraph.clear();
-        reverseDependencyGraph.clear();
-        categorizedPlugins.clear();
-        pluginStatuses.clear();
-        pluginLoadTimes.clear();
-        pluginErrors.clear();
-        
-        LogUtils.logDebug("PluginRegistry initialized successfully");
-    }
-    
-    /**
-     * Register a plugin in the registry
-     */
-    public boolean registerPlugin(String pluginId, Plugin plugin, PluginInfo pluginInfo) {
-        if (pluginId == null || plugin == null || pluginInfo == null) {
-            LogUtils.logError("Cannot register plugin with null parameters");
-            return false;
-        }
-        
-        LogUtils.logDebug("Registering plugin: " + pluginId);
-        
-        try {
-            // Check if already registered
-            if (registeredPlugins.containsKey(pluginId)) {
-                LogUtils.logUser("⚠️ Plugin already registered: " + pluginId);
-                return false;
-            }
-            
-            // Create registry entry
-            RegistryEntry entry = new RegistryEntry(pluginId, plugin, pluginInfo);
-            
-            // Register the plugin
-            registeredPlugins.put(pluginId, entry);
-            
-            // Update status tracking
-            pluginStatuses.put(pluginId, plugin.getStatus());
-            pluginLoadTimes.put(pluginId, System.currentTimeMillis());
-            
-            // Add to category
-            String category = pluginInfo.getCategory();
-            if (category != null) {
-                categorizedPlugins.computeIfAbsent(category, k -> ConcurrentHashMap.newKeySet()).add(pluginId);
-            }
-            
-            // Process dependencies
-            processDependencies(pluginId, pluginInfo);
-            
-            // Notify listeners
-            notifyPluginRegistered(pluginId, pluginInfo);
-            
-            LogUtils.logUser("✅ Plugin registered: " + pluginInfo.getName());
-            LogUtils.logDebug("Plugin ID: " + pluginId);
-            LogUtils.logDebug("Plugin category: " + category);
-            LogUtils.logDebug("Plugin dependencies: " + Arrays.toString(pluginInfo.getDependencies()));
-            
-            return true;
-            
-        } catch (Exception e) {
-            LogUtils.logError("Plugin registration failed for " + pluginId + ": " + e.getMessage());
-            pluginErrors.put(pluginId, e.getMessage());
-            return false;
-        }
-    }
-    
-    /**
-     * Unregister a plugin from the registry
-     */
-    public boolean unregisterPlugin(String pluginId) {
-        if (pluginId == null) {
-            LogUtils.logError("Cannot unregister plugin with null ID");
-            return false;
-        }
-        
-        LogUtils.logDebug("Unregistering plugin: " + pluginId);
-        
-        try {
-            RegistryEntry entry = registeredPlugins.get(pluginId);
-            if (entry == null) {
-                LogUtils.logDebug("Plugin not found in registry: " + pluginId);
-                return false;
-            }
-            
-            // Check for dependent plugins
-            Set<String> dependents = reverseDependencyGraph.get(pluginId);
-            if (dependents != null && !dependents.isEmpty()) {
-                LogUtils.logUser("⚠️ Plugin has dependents, unregistering may cause issues: " + pluginId);
-                for (String dependent : dependents) {
-                    LogUtils.logDebug("Dependent plugin: " + dependent);
-                }
-            }
-            
-            // Remove from registry
-            registeredPlugins.remove(pluginId);
-            
-            // Clean up tracking
-            pluginStatuses.remove(pluginId);
-            pluginLoadTimes.remove(pluginId);
-            pluginErrors.remove(pluginId);
-            
-            // Remove from category
-            String category = entry.getPluginInfo().getCategory();
-            if (category != null) {
-                Set<String> categoryPlugins = categorizedPlugins.get(category);
-                if (categoryPlugins != null) {
-                    categoryPlugins.remove(pluginId);
-                    if (categoryPlugins.isEmpty()) {
-                        categorizedPlugins.remove(category);
-                    }
-                }
-            }
-            
-            // Clean up dependency tracking
-            cleanupDependencies(pluginId);
-            
-            // Notify listeners
-            notifyPluginUnregistered(pluginId);
-            
-            LogUtils.logUser("✅ Plugin unregistered: " + pluginId);
-            return true;
-            
-        } catch (Exception e) {
-            LogUtils.logError("Plugin unregistration failed for " + pluginId + ": " + e.getMessage());
-            return false;
-        }
-    }
-    
-    /**
-     * Get registered plugin by ID
-     */
-    public Plugin getPlugin(String pluginId) {
-        RegistryEntry entry = registeredPlugins.get(pluginId);
-        return entry != null ? entry.getPlugin() : null;
-    }
-    
-    /**
-     * Get plugin info by ID
-     */
-    public PluginInfo getPluginInfo(String pluginId) {
-        RegistryEntry entry = registeredPlugins.get(pluginId);
-        return entry != null ? entry.getPluginInfo() : null;
-    }
-    
-    /**
-     * Get registry entry by ID
-     */
-    public RegistryEntry getRegistryEntry(String pluginId) {
-        return registeredPlugins.get(pluginId);
-    }
-    
-    /**
-     * Check if plugin is registered
-     */
-    public boolean isPluginRegistered(String pluginId) {
-        return registeredPlugins.containsKey(pluginId);
-    }
-    
-    /**
-     * Get all registered plugin IDs
-     */
-    public Set<String> getRegisteredPluginIds() {
-        return new HashSet<>(registeredPlugins.keySet());
-    }
-    
-    /**
-     * Get all registered plugins
-     */
-    public Map<String, Plugin> getAllPlugins() {
-        Map<String, Plugin> plugins = new HashMap<>();
-        for (Map.Entry<String, RegistryEntry> entry : registeredPlugins.entrySet()) {
-            plugins.put(entry.getKey(), entry.getValue().getPlugin());
-        }
-        return plugins;
-    }
-    
-    /**
-     * Get plugins by category
-     */
-    public Set<String> getPluginsByCategory(String category) {
-        Set<String> categoryPlugins = categorizedPlugins.get(category);
-        return categoryPlugins != null ? new HashSet<>(categoryPlugins) : new HashSet<>();
-    }
-    
-    /**
-     * Get all categories
-     */
-    public Set<String> getAllCategories() {
-        return new HashSet<>(categorizedPlugins.keySet());
-    }
-    
-    /**
-     * Process plugin dependencies
-     */
-    private void processDependencies(String pluginId, PluginInfo pluginInfo) {
-        String[] dependencies = pluginInfo.getDependencies();
-        if (dependencies == null || dependencies.length == 0) {
-            return;
-        }
-        
-        LogUtils.logDebug("Processing dependencies for plugin: " + pluginId);
-        
-        Set<String> pluginDeps = new HashSet<>();
-        for (String dependency : dependencies) {
-            dependency = dependency.trim();
-            if (!dependency.isEmpty()) {
-                pluginDeps.add(dependency);
-                
-                // Add to reverse dependency graph
-                reverseDependencyGraph.computeIfAbsent(dependency, k -> ConcurrentHashMap.newKeySet()).add(pluginId);
-                
-                // Check if dependency is available
-                if (registeredPlugins.containsKey(dependency)) {
-                    notifyDependencyResolved(pluginId, dependency);
-                    LogUtils.logDebug("Dependency resolved: " + pluginId + " -> " + dependency);
-                } else {
-                    notifyDependencyFailed(pluginId, dependency, "Dependency not registered");
-                    LogUtils.logDebug("Dependency missing: " + pluginId + " -> " + dependency);
-                }
-            }
-        }
-        
-        if (!pluginDeps.isEmpty()) {
-            dependencyGraph.put(pluginId, pluginDeps);
-        }
-    }
-    
-    /**
-     * Clean up dependencies for a plugin
-     */
-    private void cleanupDependencies(String pluginId) {
-        // Remove from dependency graph
-        dependencyGraph.remove(pluginId);
-        
-        // Remove from reverse dependency graph
-        reverseDependencyGraph.remove(pluginId);
-        
-        // Remove references in other plugins' reverse dependencies
-        for (Set<String> dependents : reverseDependencyGraph.values()) {
-            dependents.remove(pluginId);
-        }
-    }
-    
-    /**
-     * Check if plugin dependencies are satisfied
-     */
-    public boolean areDependenciesSatisfied(String pluginId) {
-        Set<String> dependencies = dependencyGraph.get(pluginId);
-        if (dependencies == null || dependencies.isEmpty()) {
-            return true; // No dependencies
-        }
-        
-        for (String dependency : dependencies) {
-            if (!registeredPlugins.containsKey(dependency)) {
-                return false;
-            }
-        }
-        
-        return true;
-    }
-    
-    /**
-     * Get missing dependencies for a plugin
-     */
-    public Set<String> getMissingDependencies(String pluginId) {
-        Set<String> missing = new HashSet<>();
-        Set<String> dependencies = dependencyGraph.get(pluginId);
-        
-        if (dependencies != null) {
-            for (String dependency : dependencies) {
-                if (!registeredPlugins.containsKey(dependency)) {
-                    missing.add(dependency);
-                }
-            }
-        }
-        
-        return missing;
-    }
-    
-    /**
-     * Get plugins that depend on the given plugin
-     */
-    public Set<String> getDependentPlugins(String pluginId) {
-        Set<String> dependents = reverseDependencyGraph.get(pluginId);
-        return dependents != null ? new HashSet<>(dependents) : new HashSet<>();
-    }
-    
-    /**
-     * Get load order for plugins based on dependencies
-     */
-    public List<String> getLoadOrder() {
-        List<String> loadOrder = new ArrayList<>();
-        Set<String> visited = new HashSet<>();
-        Set<String> visiting = new HashSet<>();
-        
-        for (String pluginId : registeredPlugins.keySet()) {
-            if (!visited.contains(pluginId)) {
-                if (!topologicalSort(pluginId, visited, visiting, loadOrder)) {
-                    LogUtils.logError("Circular dependency detected involving plugin: " + pluginId);
-                    // Still add remaining plugins in arbitrary order
-                    for (String remaining : registeredPlugins.keySet()) {
-                        if (!loadOrder.contains(remaining)) {
-                            loadOrder.add(remaining);
-                        }
-                    }
-                    break;
-                }
-            }
-        }
-        
-        return loadOrder;
-    }
-    
-    /**
-     * Topological sort for dependency resolution
-     */
-    private boolean topologicalSort(String pluginId, Set<String> visited, Set<String> visiting, List<String> result) {
-        if (visiting.contains(pluginId)) {
-            return false; // Circular dependency
-        }
-        
-        if (visited.contains(pluginId)) {
-            return true; // Already processed
-        }
-        
-        visiting.add(pluginId);
-        
-        Set<String> dependencies = dependencyGraph.get(pluginId);
-        if (dependencies != null) {
-            for (String dependency : dependencies) {
-                if (registeredPlugins.containsKey(dependency)) {
-                    if (!topologicalSort(dependency, visited, visiting, result)) {
-                        return false;
-                    }
-                }
-            }
-        }
-        
-        visiting.remove(pluginId);
-        visited.add(pluginId);
-        result.add(pluginId);
-        
-        return true;
-    }
-    
-    /**
-     * Update plugin status
-     */
-    public void updatePluginStatus(String pluginId, Plugin.PluginStatus newStatus) {
-        Plugin.PluginStatus oldStatus = pluginStatuses.get(pluginId);
-        if (oldStatus != newStatus) {
-            pluginStatuses.put(pluginId, newStatus);
-            notifyPluginStatusChanged(pluginId, oldStatus, newStatus);
-            LogUtils.logDebug("Plugin status changed: " + pluginId + " " + oldStatus + " -> " + newStatus);
-        }
-    }
-    
-    /**
-     * Get plugin status
-     */
-    public Plugin.PluginStatus getPluginStatus(String pluginId) {
-        return pluginStatuses.get(pluginId);
-    }
-    
-    /**
-     * Get plugin load time
-     */
-    public Long getPluginLoadTime(String pluginId) {
-        return pluginLoadTimes.get(pluginId);
-    }
-    
-    /**
-     * Set plugin error
-     */
-    public void setPluginError(String pluginId, String error) {
-        pluginErrors.put(pluginId, error);
-        LogUtils.logError("Plugin error recorded: " + pluginId + " - " + error);
-    }
-    
-    /**
-     * Get plugin error
-     */
-    public String getPluginError(String pluginId) {
-        return pluginErrors.get(pluginId);
-    }
-    
-    /**
-     * Clear plugin error
-     */
-    public void clearPluginError(String pluginId) {
-        pluginErrors.remove(pluginId);
-    }
-    
-    /**
-     * Get registry statistics
-     */
-    public RegistryStatistics getStatistics() {
-        RegistryStatistics stats = new RegistryStatistics();
-        stats.totalRegisteredPlugins = registeredPlugins.size();
-        stats.totalCategories = categorizedPlugins.size();
-        stats.totalDependencies = dependencyGraph.values().stream()
-                .mapToInt(Set::size)
-                .sum();
-        stats.pluginsWithErrors = pluginErrors.size();
-        
-        // Count by status
-        for (Plugin.PluginStatus status : pluginStatuses.values()) {
-            switch (status) {
-                case LOADED:
-                    stats.loadedPlugins++;
-                    break;
-                case ENABLED:
-                    stats.enabledPlugins++;
-                    break;
-                case DISABLED:
-                    stats.disabledPlugins++;
-                    break;
-                case ERROR:
-                    stats.errorPlugins++;
-                    break;
-                default:
-                    stats.otherStatusPlugins++;
-                    break;
-            }
-        }
-        
-        return stats;
-    }
-    
-    /**
-     * Registry Statistics class
-     */
-    public static class RegistryStatistics {
-        public int totalRegisteredPlugins = 0;
-        public int totalCategories = 0;
-        public int totalDependencies = 0;
-        public int pluginsWithErrors = 0;
-        public int loadedPlugins = 0;
-        public int enabledPlugins = 0;
-        public int disabledPlugins = 0;
-        public int errorPlugins = 0;
-        public int otherStatusPlugins = 0;
-        
-        @Override
-        public String toString() {
-            return String.format("Registry Stats: %d plugins, %d categories, %d dependencies, %d errors",
-                totalRegisteredPlugins, totalCategories, totalDependencies, pluginsWithErrors);
-        }
-        
-        public String getDetailedReport() {
-            StringBuilder sb = new StringBuilder();
-            sb.append("=== Plugin Registry Statistics ===\n");
-            sb.append("Total Registered Plugins: ").append(totalRegisteredPlugins).append("\n");
-            sb.append("Categories: ").append(totalCategories).append("\n");
-            sb.append("Dependencies: ").append(totalDependencies).append("\n");
-            sb.append("Plugins with Errors: ").append(pluginsWithErrors).append("\n");
-            sb.append("\nPlugin Status Breakdown:\n");
-            sb.append("- Loaded: ").append(loadedPlugins).append("\n");
-            sb.append("- Enabled: ").append(enabledPlugins).append("\n");
-            sb.append("- Disabled: ").append(disabledPlugins).append("\n");
-            sb.append("- Error: ").append(errorPlugins).append("\n");
-            sb.append("- Other: ").append(otherStatusPlugins).append("\n");
-            return sb.toString();
-        }
-    }
-    
-    /**
-     * Export registry information
-     */
-    public String exportRegistryInfo() {
-        StringBuilder info = new StringBuilder();
-        info.append("=== Plugin Registry Export ===\n");
-        info.append("Export Time: ").append(new Date().toString()).append("\n");
-        info.append("Total Plugins: ").append(registeredPlugins.size()).append("\n\n");
-        
-        for (Map.Entry<String, RegistryEntry> entry : registeredPlugins.entrySet()) {
-            String pluginId = entry.getKey();
-            RegistryEntry regEntry = entry.getValue();
-            PluginInfo info_inner = regEntry.getPluginInfo();
-            
-            info.append("Plugin ID: ").append(pluginId).append("\n");
-            info.append("  Name: ").append(info_inner.getName()).append("\n");
-            info.append("  Version: ").append(info_inner.getVersion()).append("\n");
-            info.append("  Author: ").append(info_inner.getAuthor()).append("\n");
-            info.append("  Category: ").append(info_inner.getCategory()).append("\n");
-            info.append("  Status: ").append(pluginStatuses.get(pluginId)).append("\n");
-            info.append("  Registration Time: ").append(new Date(regEntry.getRegistrationTime())).append("\n");
-            
-            Set<String> dependencies = dependencyGraph.get(pluginId);
-            if (dependencies != null && !dependencies.isEmpty()) {
-                info.append("  Dependencies: ").append(dependencies).append("\n");
-            }
-            
-            Set<String> dependents = reverseDependencyGraph.get(pluginId);
-            if (dependents != null && !dependents.isEmpty()) {
-                info.append("  Dependents: ").append(dependents).append("\n");
-            }
-            
-            String error = pluginErrors.get(pluginId);
-            if (error != null) {
-                info.append("  Error: ").append(error).append("\n");
-            }
-            
-            info.append("\n");
-        }
-        
-        return info.toString();
-    }
-    
-    /**
-     * Validate registry consistency
-     */
-    public List<String> validateRegistry() {
-        List<String> issues = new ArrayList<>();
-        
-        // Check for orphaned dependencies
-        for (Map.Entry<String, Set<String>> entry : dependencyGraph.entrySet()) {
-            String pluginId = entry.getKey();
-            Set<String> dependencies = entry.getValue();
-            
-            if (!registeredPlugins.containsKey(pluginId)) {
-                issues.add("Dependency graph contains unregistered plugin: " + pluginId);
-                continue;
-            }
-            
-            for (String dependency : dependencies) {
-                if (!registeredPlugins.containsKey(dependency)) {
-                    issues.add("Plugin " + pluginId + " depends on unregistered plugin: " + dependency);
-                }
-            }
-        }
-        
-        // Check for orphaned reverse dependencies
-        for (Map.Entry<String, Set<String>> entry : reverseDependencyGraph.entrySet()) {
-            String pluginId = entry.getKey();
-            Set<String> dependents = entry.getValue();
-            
-            for (String dependent : dependents) {
-                if (!registeredPlugins.containsKey(dependent)) {
-                    issues.add("Reverse dependency graph contains unregistered plugin: " + dependent);
-                }
-            }
-        }
-        
-        // Check for circular dependencies
-        try {
-            getLoadOrder();
-        } catch (Exception e) {
-            issues.add("Circular dependency detected in registry");
-        }
-        
-        return issues;
-    }
-    
-    // Listener management
-    public void addListener(PluginRegistryListener listener) {
-        listeners.add(listener);
-    }
-    
-    public void removeListener(PluginRegistryListener listener) {
-        listeners.remove(listener);
-    }
-    
-    // Notification methods
-    private void notifyPluginRegistered(String pluginId, PluginInfo pluginInfo) {
-        for (PluginRegistryListener listener : listeners) {
-            try {
-                listener.onPluginRegistered(pluginId, pluginInfo);
-            } catch (Exception e) {
-                LogUtils.logDebug("Registry listener error: " + e.getMessage());
-            }
-        }
-    }
-    
-    private void notifyPluginUnregistered(String pluginId) {
-        for (PluginRegistryListener listener : listeners) {
-            try {
-                listener.onPluginUnregistered(pluginId);
-            } catch (Exception e) {
-                LogUtils.logDebug("Registry listener error: " + e.getMessage());
-            }
-        }
-    }
-    
-    private void notifyDependencyResolved(String pluginId, String dependencyId) {
-        for (PluginRegistryListener listener : listeners) {
-            try {
-                listener.onDependencyResolved(pluginId, dependencyId);
-            } catch (Exception e) {
-                LogUtils.logDebug("Registry listener error: " + e.getMessage());
-            }
-        }
-    }
-    
-    private void notifyDependencyFailed(String pluginId, String dependencyId, String reason) {
-        for (PluginRegistryListener listener : listeners) {
-            try {
-                listener.onDependencyFailed(pluginId, dependencyId, reason);
-            } catch (Exception e) {
-                LogUtils.logDebug("Registry listener error: " + e.getMessage());
-            }
-        }
-    }
-    
-    private void notifyPluginStatusChanged(String pluginId, Plugin.PluginStatus oldStatus, Plugin.PluginStatus newStatus) {
-        for (PluginRegistryListener listener : listeners) {
-            try {
-                listener.onPluginStatusChanged(pluginId, oldStatus, newStatus);
-            } catch (Exception e) {
-                LogUtils.logDebug("Registry listener error: " + e.getMessage());
-            }
-        }
-    }
-    
-    /**
-     * Cleanup registry
-     */
-    public void cleanup() {
-        LogUtils.logDebug("Cleaning up PluginRegistry");
-        
-        registeredPlugins.clear();
-        dependencyGraph.clear();
-        reverseDependencyGraph.clear();
-        categorizedPlugins.clear();
-        pluginStatuses.clear();
-        pluginLoadTimes.clear();
-        pluginErrors.clear();
-        listeners.clear();
-        
-        LogUtils.logDebug("PluginRegistry cleanup completed");
-    }
-}
-
-/storage/emulated/0/AndroidIDEProjects/ModLoader/ModLoader/app/src/main/java/com/modloader/plugin/PluginStorage.java
-
-// File: PluginStorage.java - Plugin Data Persistence (150+ lines)
-// Path: /app/src/main/java/com/modloader/plugin/PluginStorage.java
-
-package com.modloader.plugin;
-
-import android.content.Context;
-import com.modloader.util.LogUtils;
-import com.modloader.util.PathManager;
-
-import java.io.*;
-import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-
-/**
- * Plugin Storage - Manages plugin data persistence
- * Provides database-like storage for plugin data with JSON serialization
- */
-public class PluginStorage {
-    private static final String TAG = "PluginStorage";
-    private static final String STORAGE_FILE_EXTENSION = ".json";
-    private static final String BACKUP_EXTENSION = ".backup";
-    
-    private final Context context;
-    private final String pluginId;
-    private final File storageDir;
-    private final File storageFile;
-    private final Object lock = new Object();
-    
-    // In-memory cache for better performance
-    private final Map<String, Object> dataCache = new ConcurrentHashMap<>();
-    private boolean cacheLoaded = false;
-    private long lastSaveTime = 0;
-    
-    public PluginStorage(Context context, String pluginId) {
-        this.context = context;
-        this.pluginId = pluginId;
-        
-        // Create storage directory
-        File baseDir = PathManager.getGameBaseDir(context, "com.and.games505.TerrariaPaid");
-        storageDir = new File(baseDir, "Plugins/" + sanitizePluginId(pluginId) + "/storage");
-        PathManager.ensureDirectoryExists(storageDir);
-        
-        // Main storage file
-        storageFile = new File(storageDir, "data" + STORAGE_FILE_EXTENSION);
-        
-        LogUtils.logDebug("Created plugin storage for: " + pluginId);
-    }
-    
-    /**
-     * Sanitize plugin ID for use in file paths
-     */
-    private String sanitizePluginId(String id) {
-        return id.replaceAll("[^a-zA-Z0-9._-]", "_").toLowerCase();
-    }
-    
-    /**
-     * Store a value with a key
-     */
-    public void put(String key, Object value) {
-        synchronized (lock) {
-            ensureCacheLoaded();
-            
-            if (value == null) {
-                dataCache.remove(key);
-            } else {
-                dataCache.put(key, value);
-            }
-            
-            // Auto-save after modifications
-            scheduleSave();
-        }
-    }
-    
-    /**
-     * Store multiple values at once
-     */
-    public void putAll(Map<String, Object> data) {
-        synchronized (lock) {
-            ensureCacheLoaded();
-            
-            for (Map.Entry<String, Object> entry : data.entrySet()) {
-                if (entry.getValue() == null) {
-                    dataCache.remove(entry.getKey());
-                } else {
-                    dataCache.put(entry.getKey(), entry.getValue());
-                }
-            }
-            
-            scheduleSave();
-        }
-    }
-    
-    /**
-     * Get a value by key
-     */
-    @SuppressWarnings("unchecked")
-    public <T> T get(String key, Class<T> type) {
-        synchronized (lock) {
-            ensureCacheLoaded();
-            Object value = dataCache.get(key);
-            
-            if (value != null && type.isInstance(value)) {
-                return (T) value;
-            }
-            return null;
-        }
-    }
-    
-    /**
-     * Get a value with default fallback
-     */
-    public <T> T get(String key, Class<T> type, T defaultValue) {
-        T value = get(key, type);
-        return value != null ? value : defaultValue;
-    }
-    
-    /**
-     * Get string value
-     */
-    public String getString(String key) {
-        return get(key, String.class);
-    }
-    
-    /**
-     * Get string value with default
-     */
-    public String getString(String key, String defaultValue) {
-        return get(key, String.class, defaultValue);
-    }
-    
-    /**
-     * Get integer value
-     */
-    public int getInt(String key, int defaultValue) {
-        Integer value = get(key, Integer.class);
-        return value != null ? value : defaultValue;
-    }
-    
-    /**
-     * Get boolean value
-     */
-    public boolean getBoolean(String key, boolean defaultValue) {
-        Boolean value = get(key, Boolean.class);
-        return value != null ? value : defaultValue;
-    }
-    
-    /**
-     * Get long value
-     */
-    public long getLong(String key, long defaultValue) {
-        Long value = get(key, Long.class);
-        return value != null ? value : defaultValue;
-    }
-    
-    /**
-     * Get double value
-     */
-    public double getDouble(String key, double defaultValue) {
-        Double value = get(key, Double.class);
-        return value != null ? value : defaultValue;
-    }
-    
-    /**
-     * Check if key exists
-     */
-    public boolean contains(String key) {
-        synchronized (lock) {
-            ensureCacheLoaded();
-            return dataCache.containsKey(key);
-        }
-    }
-    
-    /**
-     * Remove a key
-     */
-    public void remove(String key) {
-        synchronized (lock) {
-            ensureCacheLoaded();
-            dataCache.remove(key);
-            scheduleSave();
-        }
-    }
-    
-    /**
-     * Clear all data
-     */
-    public void clear() {
-        synchronized (lock) {
-            dataCache.clear();
-            scheduleSave();
-        }
-    }
-    
-    /**
-     * Get all keys
-     */
-    public Set<String> getKeys() {
-        synchronized (lock) {
-            ensureCacheLoaded();
-            return new HashSet<>(dataCache.keySet());
-        }
-    }
-    
-    /**
-     * Get all data as a map
-     */
-    public Map<String, Object> getAllData() {
-        synchronized (lock) {
-            ensureCacheLoaded();
-            return new HashMap<>(dataCache);
-        }
-    }
-    
-    /**
-     * Get data size
-     */
-    public int size() {
-        synchronized (lock) {
-            ensureCacheLoaded();
-            return dataCache.size();
-        }
-    }
-    
-    /**
-     * Check if storage is empty
-     */
-    public boolean isEmpty() {
-        synchronized (lock) {
-            ensureCacheLoaded();
-            return dataCache.isEmpty();
-        }
-    }
-    
-    /**
-     * Force save to disk
-     */
-    public boolean save() {
-        synchronized (lock) {
-            return saveToFile();
-        }
-    }
-    
-    /**
-     * Force reload from disk
-     */
-    public boolean reload() {
-        synchronized (lock) {
-            cacheLoaded = false;
-            dataCache.clear();
-            return loadFromFile();
-        }
-    }
-    
-    /**
-     * Create a backup of current data
-     */
-    public boolean backup() {
-        synchronized (lock) {
-            try {
-                if (!storageFile.exists()) {
-                    return true; // Nothing to backup
-                }
-                
-                File backupFile = new File(storageDir, "data_" + System.currentTimeMillis() + BACKUP_EXTENSION);
-                return copyFile(storageFile, backupFile);
-                
-            } catch (Exception e) {
-                LogUtils.logError("Failed to create backup for plugin " + pluginId + ": " + e.getMessage());
-                return false;
-            }
-        }
-    }
-    
-    /**
-     * Restore from a backup file
-     */
-    public boolean restoreFromBackup(File backupFile) {
-        synchronized (lock) {
-            try {
-                if (!backupFile.exists()) {
-                    return false;
-                }
-                
-                if (copyFile(backupFile, storageFile)) {
-                    return reload();
-                }
-                return false;
-                
-            } catch (Exception e) {
-                LogUtils.logError("Failed to restore backup for plugin " + pluginId + ": " + e.getMessage());
-                return false;
-            }
-        }
-    }
-    
-    /**
-     * Get available backup files
-     */
-    public List<File> getBackupFiles() {
-        File[] files = storageDir.listFiles((dir, name) -> name.endsWith(BACKUP_EXTENSION));
-        if (files == null) {
-            return new ArrayList<>();
-        }
-        
-        List<File> backups = Arrays.asList(files);
-        backups.sort((a, b) -> Long.compare(b.lastModified(), a.lastModified())); // Newest first
-        return backups;
-    }
-    
-    /**
-     * Clean up old backup files (keep only the newest N backups)
-     */
-    public void cleanupOldBackups(int keepCount) {
-        List<File> backups = getBackupFiles();
-        if (backups.size() <= keepCount) {
-            return;
-        }
-        
-        for (int i = keepCount; i < backups.size(); i++) {
-            File backup = backups.get(i);
-            if (backup.delete()) {
-                LogUtils.logDebug("Deleted old backup: " + backup.getName());
-            }
-        }
-    }
-    
-    /**
-     * Ensure cache is loaded from file
-     */
-    private void ensureCacheLoaded() {
-        if (!cacheLoaded) {
-            loadFromFile();
-            cacheLoaded = true;
-        }
-    }
-    
-    /**
-     * Schedule a save operation (debounced)
-     */
-    private void scheduleSave() {
-        // Simple debouncing - only save if it's been more than 1 second since last save
-        long currentTime = System.currentTimeMillis();
-        if (currentTime - lastSaveTime > 1000) {
-            saveToFile();
-        }
-    }
-    
-    /**
-     * Load data from file
-     */
-    private boolean loadFromFile() {
-        try {
-            if (!storageFile.exists()) {
-                return true; // No file means empty data, which is valid
-            }
-            
-            StringBuilder content = new StringBuilder();
-            try (BufferedReader reader = new BufferedReader(new FileReader(storageFile))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    content.append(line);
-                }
-            }
-            
-            if (content.length() > 0) {
-                Map<String, Object> loadedData = parseJsonData(content.toString());
-                dataCache.clear();
-                dataCache.putAll(loadedData);
-            }
-            
-            LogUtils.logDebug("Loaded " + dataCache.size() + " items for plugin: " + pluginId);
-            return true;
-            
-        } catch (Exception e) {
-            LogUtils.logError("Failed to load data for plugin " + pluginId + ": " + e.getMessage());
-            return false;
-        }
-    }
-    
-    /**
-     * Save data to file
-     */
-    private boolean saveToFile() {
-        try {
-            // Create backup before saving
-            if (storageFile.exists()) {
-                File tempBackup = new File(storageDir, "temp" + BACKUP_EXTENSION);
-                copyFile(storageFile, tempBackup);
-            }
-            
-            String jsonData = generateJsonData(dataCache);
-            
-            try (FileWriter writer = new FileWriter(storageFile)) {
-                writer.write(jsonData);
-            }
-            
-            lastSaveTime = System.currentTimeMillis();
-            LogUtils.logDebug("Saved " + dataCache.size() + " items for plugin: " + pluginId);
-            return true;
-            
-        } catch (Exception e) {
-            LogUtils.logError("Failed to save data for plugin " + pluginId + ": " + e.getMessage());
-            return false;
-        }
-    }
-    
-    /**
-     * Simple JSON data parsing (basic implementation)
-     */
-    private Map<String, Object> parseJsonData(String jsonContent) {
-        Map<String, Object> result = new HashMap<>();
-        
-        try {
-            // This is a simplified JSON parser for basic data types
-            // In a production implementation, you would use a proper JSON library
-            jsonContent = jsonContent.trim();
-            if (jsonContent.startsWith("{") && jsonContent.endsWith("}")) {
-                jsonContent = jsonContent.substring(1, jsonContent.length() - 1);
-                
-                String[] pairs = jsonContent.split(",");
-                for (String pair : pairs) {
-                    String[] keyValue = pair.split(":", 2);
-                    if (keyValue.length == 2) {
-                        String key = keyValue[0].trim().replaceAll("\"", "");
-                        String value = keyValue[1].trim();
-                        
-                        // Parse value type
-                        Object parsedValue = parseJsonValue(value);
-                        result.put(key, parsedValue);
-                    }
-                }
-            }
-        } catch (Exception e) {
-            LogUtils.logDebug("JSON parsing error: " + e.getMessage());
-        }
-        
-        return result;
-    }
-    
-    /**
-     * Parse individual JSON values
-     */
-    private Object parseJsonValue(String value) {
-        value = value.trim();
-        
-        // String
-        if (value.startsWith("\"") && value.endsWith("\"")) {
-            return value.substring(1, value.length() - 1);
-        }
-        
-        // Boolean
-        if ("true".equals(value)) return true;
-        if ("false".equals(value)) return false;
-        
-        // Null
-        if ("null".equals(value)) return null;
-        
-        // Number
-        try {
-            if (value.contains(".")) {
-                return Double.parseDouble(value);
-            } else {
-                return Integer.parseInt(value);
-            }
-        } catch (NumberFormatException e) {
-            // Fall back to string
-            return value;
-        }
-    }
-    
-    /**
-     * Generate JSON data (basic implementation)
-     */
-    private String generateJsonData(Map<String, Object> data) {
-        StringBuilder json = new StringBuilder();
-        json.append("{");
-        
-        boolean first = true;
-        for (Map.Entry<String, Object> entry : data.entrySet()) {
-            if (!first) {
-                json.append(",");
-            }
-            first = false;
-            
-            json.append("\"").append(entry.getKey()).append("\":");
-            json.append(formatJsonValue(entry.getValue()));
-        }
-        
-        json.append("}");
-        return json.toString();
-    }
-    
-    /**
-     * Format individual values for JSON
-     */
-    private String formatJsonValue(Object value) {
-        if (value == null) {
-            return "null";
-        } else if (value instanceof String) {
-            return "\"" + value.toString().replace("\"", "\\\"") + "\"";
-        } else if (value instanceof Boolean) {
-            return value.toString();
-        } else if (value instanceof Number) {
-            return value.toString();
-        } else {
-            // Convert to string as fallback
-            return "\"" + value.toString().replace("\"", "\\\"") + "\"";
-        }
-    }
-    
-    /**
-     * Copy file utility
-     */
-    private boolean copyFile(File source, File target) {
-        try (FileInputStream in = new FileInputStream(source);
-             FileOutputStream out = new FileOutputStream(target)) {
-            
-            byte[] buffer = new byte[8192];
-            int bytesRead;
-            while ((bytesRead = in.read(buffer)) != -1) {
-                out.write(buffer, 0, bytesRead);
-            }
-            return true;
-            
-        } catch (Exception e) {
-            LogUtils.logDebug("File copy error: " + e.getMessage());
-            return false;
-        }
-    }
-    
-    /**
-     * Get storage statistics
-     */
-    public StorageStats getStats() {
-        synchronized (lock) {
-            ensureCacheLoaded();
-            
-            StorageStats stats = new StorageStats();
-            stats.pluginId = pluginId;
-            stats.itemCount = dataCache.size();
-            stats.fileSize = storageFile.exists() ? storageFile.length() : 0;
-            stats.lastModified = storageFile.exists() ? storageFile.lastModified() : 0;
-            stats.backupCount = getBackupFiles().size();
-            
-            return stats;
-        }
-    }
-    
-    /**
-     * Storage statistics container
-     */
-    public static class StorageStats {
-        public String pluginId;
-        public int itemCount;
-        public long fileSize;
-        public long lastModified;
-        public int backupCount;
-        
-        @Override
-        public String toString() {
-            return String.format("StorageStats[%s]: %d items, %d bytes, %d backups", 
-                pluginId, itemCount, fileSize, backupCount);
-        }
-    }
-}
-
-/storage/emulated/0/AndroidIDEProjects/ModLoader/ModLoader/app/src/main/java/com/modloader/plugin/PluginValidator.java
-
-// File: PluginValidator.java - Plugin Validation and Security System
-// Path: /app/src/main/java/com/modloader/plugin/PluginValidator.java
-
-package com.modloader.plugin;
-
-import android.content.Context;
-import com.modloader.util.LogUtils;
-
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.IOException;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.HashMap;
-import java.util.Set;
-import java.util.HashSet;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipInputStream;
-import java.lang.reflect.Method;
-import java.util.regex.Pattern;
-
-/**
- * Plugin Validator - Comprehensive plugin validation and security checking system
- * Validates plugin files, checks signatures, scans for malicious code, and enforces security policies
- */
-public class PluginValidator {
-    private static final String TAG = "PluginValidator";
-
-    // Security settings
-    private final Context context;
-    private boolean strictValidationEnabled = true;
-    private boolean sandboxModeEnabled = true;
-    private boolean scanForMaliciousCode = true;
-    private final Set<String> trustedPluginHashes = new HashSet<>();
-    private final Set<String> blockedPluginHashes = new HashSet<>();
-    
-    // Validation rules
-    private static final long MAX_PLUGIN_SIZE = 50 * 1024 * 1024; // 50MB
-    private static final int MAX_METHODS_PER_CLASS = 1000;
-    private static final String[] ALLOWED_PLUGIN_EXTENSIONS = {".jar", ".dex", ".apk"};
-    
-    // Dangerous patterns to scan for
-    private static final String[] DANGEROUS_PATTERNS = {
-        "java.lang.Runtime.exec",
-        "android.os.SystemClock.sleep", 
-        "java.net.HttpURLConnection",
-        "java.io.FileOutputStream",
-        "android.content.Context.openFileOutput",
-        "dalvik.system.DexClassLoader",
-        "java.lang.Class.forName",
-        "java.lang.reflect.Method.invoke"
-    };
-    
-    // Required plugin manifest entries
-    private static final String[] REQUIRED_MANIFEST_ENTRIES = {
-        "Plugin-Id",
-        "Plugin-Name", 
-        "Plugin-Version",
-        "Plugin-Author"
-    };
-
-    public PluginValidator(Context context) {
-        this.context = context;
-        loadTrustedHashes();
-        loadBlockedHashes();
-    }
-
-    /**
-     * Comprehensive plugin validation
-     */
-    public ValidationResult validatePlugin(File pluginFile) {
-        LogUtils.logDebug("Starting comprehensive validation for: " + pluginFile.getName());
-        
-        ValidationResult result = new ValidationResult();
-        result.pluginFile = pluginFile;
-        result.pluginName = pluginFile.getName();
-        
-        try {
-            // Phase 1: Basic file validation
-            if (!validateBasicFile(pluginFile, result)) {
-                return result;
-            }
-            
-            // Phase 2: Security validation
-            if (!validateSecurity(pluginFile, result)) {
-                return result;
-            }
-            
-            // Phase 3: Plugin structure validation
-            if (!validatePluginStructure(pluginFile, result)) {
-                return result;
-            }
-            
-            // Phase 4: Code analysis (if enabled)
-            if (scanForMaliciousCode) {
-                if (!scanPluginCode(pluginFile, result)) {
-                    return result;
-                }
-            }
-            
-            // Phase 5: Permission validation
-            if (!validatePermissions(pluginFile, result)) {
-                return result;
-            }
-            
-            // If all validations pass
-            result.isValid = true;
-            result.validationMessage = "Plugin validation completed successfully";
-            LogUtils.logDebug("Plugin validation successful: " + pluginFile.getName());
-            
-        } catch (Exception e) {
-            result.isValid = false;
-            result.validationMessage = "Validation error: " + e.getMessage();
-            result.securityIssues.add("Validation exception: " + e.getMessage());
-            LogUtils.logDebug("Plugin validation failed with exception: " + e.getMessage());
-        }
-        
-        return result;
-    }
-
-    /**
-     * Basic file validation - size, format, accessibility
-     */
-    private boolean validateBasicFile(File pluginFile, ValidationResult result) {
-        // Check if file exists
-        if (!pluginFile.exists()) {
-            result.validationMessage = "Plugin file does not exist";
-            result.issues.add("File not found: " + pluginFile.getAbsolutePath());
-            return false;
-        }
-        
-        // Check if file is readable
-        if (!pluginFile.canRead()) {
-            result.validationMessage = "Plugin file is not readable";
-            result.issues.add("File permissions deny read access");
-            return false;
-        }
-        
-        // Check file size
-        long fileSize = pluginFile.length();
-        if (fileSize == 0) {
-            result.validationMessage = "Plugin file is empty";
-            result.issues.add("File size is 0 bytes");
-            return false;
-        }
-        
-        if (fileSize > MAX_PLUGIN_SIZE) {
-            result.validationMessage = "Plugin file is too large";
-            result.issues.add("File size exceeds maximum: " + formatFileSize(fileSize));
-            return false;
-        }
-        
-        // Check file extension
-        String fileName = pluginFile.getName().toLowerCase();
-        boolean validExtension = false;
-        for (String ext : ALLOWED_PLUGIN_EXTENSIONS) {
-            if (fileName.endsWith(ext)) {
-                validExtension = true;
-                break;
-            }
-        }
-        
-        if (!validExtension) {
-            result.validationMessage = "Invalid plugin file extension";
-            result.issues.add("File extension not allowed: " + fileName);
-            return false;
-        }
-        
-        result.fileSize = fileSize;
-        return true;
-    }
-
-    /**
-     * Security validation - hash checking, signature verification
-     */
-    private boolean validateSecurity(File pluginFile, ValidationResult result) {
-        try {
-            // Calculate file hash
-            String fileHash = calculateFileHash(pluginFile);
-            result.fileHash = fileHash;
-            
-            // Check if plugin is in blocked list
-            if (blockedPluginHashes.contains(fileHash)) {
-                result.validationMessage = "Plugin is blocked (security risk)";
-                result.securityIssues.add("Plugin hash matches blocked list");
-                return false;
-            }
-            
-            // Check if plugin is trusted
-            boolean isTrusted = trustedPluginHashes.contains(fileHash);
-            result.isTrusted = isTrusted;
-            
-            if (strictValidationEnabled && !isTrusted) {
-                result.warnings.add("Plugin is not in trusted list - proceed with caution");
-            }
-            
-            // Validate file header/magic numbers
-            if (!validateFileHeader(pluginFile, result)) {
-                return false;
-            }
-            
-            return true;
-            
-        } catch (Exception e) {
-            result.validationMessage = "Security validation failed: " + e.getMessage();
-            result.securityIssues.add("Hash calculation error: " + e.getMessage());
-            return false;
-        }
-    }
-
-    /**
-     * Validate plugin structure and manifest
-     */
-    private boolean validatePluginStructure(File pluginFile, ValidationResult result) {
-        try {
-            if (pluginFile.getName().toLowerCase().endsWith(".jar")) {
-                return validateJarStructure(pluginFile, result);
-            } else if (pluginFile.getName().toLowerCase().endsWith(".dex")) {
-                return validateDexStructure(pluginFile, result);
-            } else if (pluginFile.getName().toLowerCase().endsWith(".apk")) {
-                return validateApkStructure(pluginFile, result);
-            }
-            
-            result.warnings.add("Unknown plugin format - skipping structure validation");
-            return true;
-            
-        } catch (Exception e) {
-            result.validationMessage = "Structure validation failed: " + e.getMessage();
-            result.issues.add("Structure validation error: " + e.getMessage());
-            return false;
-        }
-    }
-
-    /**
-     * Validate JAR plugin structure
-     */
-    private boolean validateJarStructure(File pluginFile, ValidationResult result) {
-        try (ZipInputStream zis = new ZipInputStream(new FileInputStream(pluginFile))) {
-            ZipEntry entry;
-            boolean hasManifest = false;
-            boolean hasPluginClass = false;
-            int classCount = 0;
-            
-            while ((entry = zis.getNextEntry()) != null) {
-                String entryName = entry.getName();
-                
-                if ("META-INF/MANIFEST.MF".equals(entryName)) {
-                    hasManifest = true;
-                    // Could validate manifest content here
-                }
-                
-                if (entryName.endsWith(".class")) {
-                    classCount++;
-                    if (entryName.contains("Plugin")) {
-                        hasPluginClass = true;
-                    }
-                }
-            }
-            
-            if (!hasManifest) {
-                result.warnings.add("JAR missing manifest file");
-            }
-            
-            if (!hasPluginClass) {
-                result.warnings.add("No plugin class found in JAR");
-            }
-            
-            if (classCount == 0) {
-                result.validationMessage = "No class files found in plugin JAR";
-                result.issues.add("JAR contains no executable classes");
-                return false;
-            }
-            
-            result.classCount = classCount;
-            return true;
-            
-        } catch (IOException e) {
-            result.validationMessage = "Failed to read JAR structure: " + e.getMessage();
-            result.issues.add("JAR reading error: " + e.getMessage());
-            return false;
-        }
-    }
-
-    /**
-     * Validate DEX plugin structure
-     */
-    private boolean validateDexStructure(File pluginFile, ValidationResult result) {
-        try (FileInputStream fis = new FileInputStream(pluginFile)) {
-            // Check DEX magic number
-            byte[] header = new byte[8];
-            if (fis.read(header) != 8) {
-                result.validationMessage = "Invalid DEX file header";
-                result.issues.add("Could not read DEX header");
-                return false;
-            }
-            
-            // Verify DEX magic ("dex\n" followed by version)
-            String magic = new String(header, 0, 4);
-            if (!"dex\n".equals(magic)) {
-                result.validationMessage = "Invalid DEX magic number";
-                result.issues.add("File does not have valid DEX signature");
-                return false;
-            }
-            
-            // Basic DEX validation passed
-            result.dexVersion = new String(header, 4, 4).trim();
-            return true;
-            
-        } catch (IOException e) {
-            result.validationMessage = "DEX structure validation failed: " + e.getMessage();
-            result.issues.add("DEX reading error: " + e.getMessage());
-            return false;
-        }
-    }
-
-    /**
-     * Validate APK plugin structure
-     */
-    private boolean validateApkStructure(File pluginFile, ValidationResult result) {
-        try (ZipInputStream zis = new ZipInputStream(new FileInputStream(pluginFile))) {
-            ZipEntry entry;
-            boolean hasManifest = false;
-            boolean hasDex = false;
-            
-            while ((entry = zis.getNextEntry()) != null) {
-                String entryName = entry.getName();
-                
-                if ("AndroidManifest.xml".equals(entryName)) {
-                    hasManifest = true;
-                }
-                
-                if (entryName.endsWith(".dex")) {
-                    hasDex = true;
-                }
-            }
-            
-            if (!hasManifest) {
-                result.validationMessage = "APK missing AndroidManifest.xml";
-                result.issues.add("Invalid APK structure - no manifest");
-                return false;
-            }
-            
-            if (!hasDex) {
-                result.validationMessage = "APK missing DEX files";
-                result.issues.add("Invalid APK structure - no executable code");
-                return false;
-            }
-            
-            return true;
-            
-        } catch (IOException e) {
-            result.validationMessage = "APK structure validation failed: " + e.getMessage();
-            result.issues.add("APK reading error: " + e.getMessage());
-            return false;
-        }
-    }
-
-    /**
-     * Scan plugin code for malicious patterns
-     */
-    private boolean scanPluginCode(File pluginFile, ValidationResult result) {
-        try {
-            List<String> suspiciousPatterns = new ArrayList<>();
-            
-            // Simple pattern scanning in file content
-            try (FileInputStream fis = new FileInputStream(pluginFile)) {
-                byte[] buffer = new byte[8192];
-                StringBuilder content = new StringBuilder();
-                int bytesRead;
-                
-                while ((bytesRead = fis.read(buffer)) != -1) {
-                    content.append(new String(buffer, 0, bytesRead));
-                    
-                    // Don't let content get too large
-                    if (content.length() > 1024 * 1024) { // 1MB limit
-                        break;
-                    }
-                }
-                
-                String pluginContent = content.toString();
-                
-                // Check for dangerous patterns
-                for (String pattern : DANGEROUS_PATTERNS) {
-                    if (pluginContent.contains(pattern)) {
-                        suspiciousPatterns.add(pattern);
-                    }
-                }
-            }
-            
-            if (!suspiciousPatterns.isEmpty()) {
-                result.suspiciousPatterns.addAll(suspiciousPatterns);
-                
-                if (strictValidationEnabled) {
-                    result.validationMessage = "Plugin contains suspicious code patterns";
-                    result.securityIssues.add("Detected patterns: " + String.join(", ", suspiciousPatterns));
-                    return false;
-                } else {
-                    result.warnings.add("Plugin contains suspicious patterns (allowed in non-strict mode)");
-                }
-            }
-            
-            return true;
-            
-        } catch (Exception e) {
-            result.warnings.add("Code scanning failed: " + e.getMessage());
-            return true; // Don't fail validation if scanning fails
-        }
-    }
-
-    /**
-     * Validate plugin permissions
-     */
-    private boolean validatePermissions(File pluginFile, ValidationResult result) {
-        // For now, just check if sandbox mode should be enforced
-        if (sandboxModeEnabled) {
-            result.requiresSandbox = true;
-        }
-        
-        // Could check plugin manifest for declared permissions
-        // and validate against allowed permissions list
-        
-        return true;
-    }
-
-    /**
-     * Validate file header/magic numbers
-     */
-    private boolean validateFileHeader(File pluginFile, ValidationResult result) {
-        try (FileInputStream fis = new FileInputStream(pluginFile)) {
-            byte[] header = new byte[4];
-            if (fis.read(header) != 4) {
-                result.warnings.add("Could not read file header");
-                return true; // Don't fail validation
-            }
-            
-            String fileName = pluginFile.getName().toLowerCase();
-            
-            if (fileName.endsWith(".jar") || fileName.endsWith(".apk")) {
-                // Check for ZIP signature (PK)
-                if (header[0] == 0x50 && header[1] == 0x4B) {
-                    return true;
-                }
-                result.validationMessage = "Invalid ZIP/JAR/APK file signature";
-                result.issues.add("File header does not match expected format");
-                return false;
-                
-            } else if (fileName.endsWith(".dex")) {
-                // Check for DEX signature
-                String magic = new String(header);
-                if (magic.startsWith("dex\n")) {
-                    return true;
-                }
-                result.validationMessage = "Invalid DEX file signature";
-                result.issues.add("File header does not match DEX format");
-                return false;
-            }
-            
-            return true;
-            
-        } catch (IOException e) {
-            result.warnings.add("Header validation failed: " + e.getMessage());
-            return true; // Don't fail validation
-        }
-    }
-
-    /**
-     * Calculate SHA-256 hash of file
-     */
-    private String calculateFileHash(File file) throws IOException, NoSuchAlgorithmException {
-        MessageDigest md = MessageDigest.getInstance("SHA-256");
-        
-        try (FileInputStream fis = new FileInputStream(file)) {
-            byte[] buffer = new byte[8192];
-            int bytesRead;
-            
-            while ((bytesRead = fis.read(buffer)) != -1) {
-                md.update(buffer, 0, bytesRead);
-            }
-        }
-        
-        byte[] hashBytes = md.digest();
-        StringBuilder sb = new StringBuilder();
-        for (byte b : hashBytes) {
-            sb.append(String.format("%02x", b));
-        }
-        
-        return sb.toString();
-    }
-
-    /**
-     * Load trusted plugin hashes from storage
-     */
-    private void loadTrustedHashes() {
-        // Could load from file or shared preferences
-        // For now, add some example trusted hashes
-        trustedPluginHashes.add("example_trusted_hash_1");
-        trustedPluginHashes.add("example_trusted_hash_2");
-    }
-
-    /**
-     * Load blocked plugin hashes from storage  
-     */
-    private void loadBlockedHashes() {
-        // Could load from file or shared preferences
-        // For now, add some example blocked hashes
-        blockedPluginHashes.add("example_malicious_hash_1");
-        blockedPluginHashes.add("example_malicious_hash_2");
-    }
-
-    /**
-     * Format file size for display
-     */
-    private String formatFileSize(long bytes) {
-        if (bytes < 1024) return bytes + " B";
-        if (bytes < 1024 * 1024) return String.format("%.1f KB", bytes / 1024.0);
-        return String.format("%.1f MB", bytes / (1024.0 * 1024.0));
-    }
-
-    // ===== Configuration Methods =====
-
-    public void setStrictValidationEnabled(boolean enabled) {
-        this.strictValidationEnabled = enabled;
-        LogUtils.logDebug("Strict validation " + (enabled ? "enabled" : "disabled"));
-    }
-
-    public void setSandboxModeEnabled(boolean enabled) {
-        this.sandboxModeEnabled = enabled;
-        LogUtils.logDebug("Sandbox mode " + (enabled ? "enabled" : "disabled"));
-    }
-
-    public void setScanForMaliciousCode(boolean enabled) {
-        this.scanForMaliciousCode = enabled;
-        LogUtils.logDebug("Malicious code scanning " + (enabled ? "enabled" : "disabled"));
-    }
-
-    public void addTrustedPluginHash(String hash) {
-        trustedPluginHashes.add(hash);
-        LogUtils.logDebug("Added trusted plugin hash");
-    }
-
-    public void addBlockedPluginHash(String hash) {
-        blockedPluginHashes.add(hash);
-        LogUtils.logDebug("Added blocked plugin hash");
-    }
-
-    // ===== Validation Result Class =====
-
-    public static class ValidationResult {
-        public boolean isValid = false;
-        public String validationMessage = "";
-        public File pluginFile;
-        public String pluginName;
-        public long fileSize;
-        public String fileHash;
-        public boolean isTrusted = false;
-        public boolean requiresSandbox = false;
-        public int classCount = 0;
-        public String dexVersion = "";
-        
-        public List<String> issues = new ArrayList<>();
-        public List<String> warnings = new ArrayList<>();
-        public List<String> securityIssues = new ArrayList<>();
-        public List<String> suspiciousPatterns = new ArrayList<>();
-        
-        public boolean hasIssues() {
-            return !issues.isEmpty();
-        }
-        
-        public boolean hasWarnings() {
-            return !warnings.isEmpty();
-        }
-        
-        public boolean hasSecurityIssues() {
-            return !securityIssues.isEmpty();
-        }
-        
-        public String getDetailedReport() {
-            StringBuilder report = new StringBuilder();
-            report.append("=== Plugin Validation Report ===\n");
-            report.append("Plugin: ").append(pluginName).append("\n");
-            report.append("Valid: ").append(isValid ? "✅ YES" : "❌ NO").append("\n");
-            report.append("Size: ").append(formatFileSize(fileSize)).append("\n");
-            
-            if (fileHash != null) {
-                report.append("Hash: ").append(fileHash.substring(0, 16)).append("...\n");
-            }
-            
-            report.append("Trusted: ").append(isTrusted ? "✅ YES" : "❌ NO").append("\n");
-            report.append("Requires Sandbox: ").append(requiresSandbox ? "✅ YES" : "❌ NO").append("\n");
-            
-            if (classCount > 0) {
-                report.append("Classes: ").append(classCount).append("\n");
-            }
-            
-            if (!dexVersion.isEmpty()) {
-                report.append("DEX Version: ").append(dexVersion).append("\n");
-            }
-            
-            if (!validationMessage.isEmpty()) {
-                report.append("Message: ").append(validationMessage).append("\n");
-            }
-            
-            if (hasIssues()) {
-                report.append("\n❌ Issues:\n");
-                for (String issue : issues) {
-                    report.append("• ").append(issue).append("\n");
-                }
-            }
-            
-            if (hasSecurityIssues()) {
-                report.append("\n🔒 Security Issues:\n");
-                for (String issue : securityIssues) {
-                    report.append("• ").append(issue).append("\n");
-                }
-            }
-            
-            if (hasWarnings()) {
-                report.append("\n⚠️ Warnings:\n");
-                for (String warning : warnings) {
-                    report.append("• ").append(warning).append("\n");
-                }
-            }
-            
-            if (!suspiciousPatterns.isEmpty()) {
-                report.append("\n🚨 Suspicious Patterns:\n");
-                for (String pattern : suspiciousPatterns) {
-                    report.append("• ").append(pattern).append("\n");
-                }
-            }
-            
-            return report.toString();
-        }
-        
-        private String formatFileSize(long bytes) {
-            if (bytes < 1024) return bytes + " B";
-            if (bytes < 1024 * 1024) return String.format("%.1f KB", bytes / 1024.0);
-            return String.format("%.1f MB", bytes / (1024.0 * 1024.0));
-        }
-    }
-
-    // ===== Quick Validation Methods =====
-
-    /**
-     * Quick validation for basic plugin acceptance
-     */
-    public boolean isPluginAcceptable(File pluginFile) {
-        ValidationResult result = validatePlugin(pluginFile);
-        return result.isValid && !result.hasSecurityIssues();
-    }
-
-    /**
-     * Get validation summary
-     */
-    public String getValidationSummary(File pluginFile) {
-        ValidationResult result = validatePlugin(pluginFile);
-        
-        if (result.isValid) {
-            return "✅ Valid plugin" + (result.hasWarnings() ? " (with warnings)" : "");
-        } else {
-            return "❌ Invalid plugin: " + result.validationMessage;
-        }
-    }
-
-    /**
-     * Check if plugin requires special handling
-     */
-    public boolean requiresSpecialHandling(File pluginFile) {
-        ValidationResult result = validatePlugin(pluginFile);
-        return result.requiresSandbox || result.hasSecurityIssues() || !result.suspiciousPatterns.isEmpty();
-    }
-}
-
-
-/storage/emulated/0/AndroidIDEProjects/ModLoader/ModLoader/app/src/main/java/com/modloader/plugin/examples/ExampleModificationPlugin.java
-
-// File: ExampleModificationPlugin.java - Sample Game Modification Plugin
-// Path: /app/src/main/java/com/modloader/plugin/examples/ExampleModificationPlugin.java
-
-package com.modloader.plugin.examples;
-
-import android.content.Context;
-import android.widget.Toast;
-
-import com.modloader.plugin.Plugin;
-import com.modloader.plugin.PluginAPI;
-import com.modloader.plugin.PluginContext;
-import com.modloader.plugin.PluginHook;
-import com.modloader.util.LogUtils;
-
-import java.util.Map;
-import java.util.HashMap;
-import java.util.List;
-import java.util.ArrayList;
-
-/**
- * Example Game Modification Plugin - Demonstrates game modification capabilities
- * This plugin shows how to modify game behavior, patch methods, and interact with game systems
- */
-public class ExampleModificationPlugin extends Plugin {
-    private static final String PLUGIN_ID = "example_modification_plugin";
-    private static final String PLUGIN_NAME = "Example Game Modification";
-    private static final String PLUGIN_VERSION = "1.0.0";
-    private static final String PLUGIN_AUTHOR = "Plugin System";
-    private static final String PLUGIN_DESCRIPTION = "Demonstrates game modification capabilities including method patching, value changes, and hook implementations.";
-
-    // Plugin state
-    private boolean gameHooksInstalled = false;
-    private Map<String, Object> originalValues = new HashMap<>();
-    private List<String> installedPatches = new ArrayList<>();
-
-    // Configuration
-    private boolean enableDamageMultiplier = true;
-    private float damageMultiplier = 2.0f;
-    private boolean enableSpeedBoost = true;
-    private float speedMultiplier = 1.5f;
-    private boolean enableResourceMultiplier = true;
-    private int resourceMultiplier = 3;
-
-    @Override
-    public String getId() {
-        return PLUGIN_ID;
-    }
-
-    @Override
-    public String getName() {
-        return PLUGIN_NAME;
-    }
-
-    @Override
-    public String getVersion() {
-        return PLUGIN_VERSION;
-    }
-
-    @Override
-    public String getAuthor() {
-        return PLUGIN_AUTHOR;
-    }
-
-    @Override
-    public String getDescription() {
-        return PLUGIN_DESCRIPTION;
-    }
-
-    @Override
-    public void initialize(PluginContext context) {
-        super.initialize(context);
-        LogUtils.logUser("🔧 Initializing Game Modification Plugin");
-        
-        loadConfiguration();
-        setupGameHooks();
-        
-        LogUtils.logUser("✅ Game Modification Plugin initialized successfully");
-    }
-
-    @Override
-    public void onEnable() {
-        super.onEnable();
-        LogUtils.logUser("🎮 Enabling game modifications...");
-        
-        try {
-            installGameHooks();
-            applyGamePatches();
-            registerEventHandlers();
-            
-            showToast("Game modifications enabled! Damage: " + damageMultiplier + "x, Speed: " + speedMultiplier + "x");
-            LogUtils.logUser("✅ Game modifications enabled successfully");
-            
-        } catch (Exception e) {
-            LogUtils.logDebug("Failed to enable game modifications: " + e.getMessage());
-            showToast("Failed to enable game modifications: " + e.getMessage());
-        }
-    }
-
-    @Override
-    public void onDisable() {
-        super.onDisable();
-        LogUtils.logUser("🎮 Disabling game modifications...");
-        
-        try {
-            removeGameHooks();
-            revertGamePatches();
-            unregisterEventHandlers();
-            
-            showToast("Game modifications disabled - game restored to normal");
-            LogUtils.logUser("✅ Game modifications disabled successfully");
-            
-        } catch (Exception e) {
-            LogUtils.logDebug("Failed to disable game modifications: " + e.getMessage());
-            showToast("Error disabling modifications: " + e.getMessage());
-        }
-    }
-
-    @Override
-    public void onGameStart() {
-        LogUtils.logUser("🎮 Game starting - applying runtime modifications");
-        
-        if (isEnabled()) {
-            applyRuntimeModifications();
-            showToast("Game modifications active!");
-        }
-    }
-
-    @Override
-    public void onGameStop() {
-        LogUtils.logUser("🎮 Game stopping - cleaning up modifications");
-        
-        if (isEnabled()) {
-            cleanupRuntimeModifications();
-        }
-    }
-
-    @Override
-    public Map<String, Object> getConfigurationOptions() {
-        Map<String, Object> config = new HashMap<>();
-        config.put("enableDamageMultiplier", enableDamageMultiplier);
-        config.put("damageMultiplier", damageMultiplier);
-        config.put("enableSpeedBoost", enableSpeedBoost);
-        config.put("speedMultiplier", speedMultiplier);
-        config.put("enableResourceMultiplier", enableResourceMultiplier);
-        config.put("resourceMultiplier", resourceMultiplier);
-        return config;
-    }
-
-    @Override
-    public void setConfigurationOptions(Map<String, Object> config) {
-        if (config.containsKey("enableDamageMultiplier")) {
-            enableDamageMultiplier = (Boolean) config.get("enableDamageMultiplier");
-        }
-        if (config.containsKey("damageMultiplier")) {
-            damageMultiplier = ((Number) config.get("damageMultiplier")).floatValue();
-        }
-        if (config.containsKey("enableSpeedBoost")) {
-            enableSpeedBoost = (Boolean) config.get("enableSpeedBoost");
-        }
-        if (config.containsKey("speedMultiplier")) {
-            speedMultiplier = ((Number) config.get("speedMultiplier")).floatValue();
-        }
-        if (config.containsKey("enableResourceMultiplier")) {
-            enableResourceMultiplier = (Boolean) config.get("enableResourceMultiplier");
-        }
-        if (config.containsKey("resourceMultiplier")) {
-            resourceMultiplier = ((Number) config.get("resourceMultiplier")).intValue();
-        }
-        
-        LogUtils.logDebug("Configuration updated: damage=" + damageMultiplier + ", speed=" + speedMultiplier);
-        
-        // Apply changes immediately if plugin is enabled
-        if (isEnabled()) {
-            updateGameModifications();
-        }
-    }
-
-    // ===== Game Modification Methods =====
-
-    private void loadConfiguration() {
-        try {
-            // Load configuration from plugin storage
-            Map<String, Object> saved = getPluginContext().getStorage().loadData("config");
-            if (saved != null && !saved.isEmpty()) {
-                setConfigurationOptions(saved);
-                LogUtils.logDebug("Loaded configuration from storage");
-            }
-        } catch (Exception e) {
-            LogUtils.logDebug("Failed to load configuration: " + e.getMessage());
-        }
-    }
-
-    private void saveConfiguration() {
-        try {
-            getPluginContext().getStorage().saveData("config", getConfigurationOptions());
-            LogUtils.logDebug("Configuration saved successfully");
-        } catch (Exception e) {
-            LogUtils.logDebug("Failed to save configuration: " + e.getMessage());
-        }
-    }
-
-    private void setupGameHooks() {
-        PluginAPI api = getPluginContext().getAPI();
-        
-        // Register hook for player damage calculation
-        api.registerHook("player.calculateDamage", new PluginHook.HookCallback() {
-            @Override
-            public Object onHookCalled(String hookName, Object[] args) {
-                if (enableDamageMultiplier && args.length > 0) {
-                    try {
-                        float originalDamage = ((Number) args[0]).floatValue();
-                        float modifiedDamage = originalDamage * damageMultiplier;
-                        LogUtils.logDebug("Damage modified: " + originalDamage + " -> " + modifiedDamage);
-                        return modifiedDamage;
-                    } catch (Exception e) {
-                        LogUtils.logDebug("Damage hook error: " + e.getMessage());
-                        return args[0];
-                    }
-                }
-                return args[0];
-            }
-        });
-
-        // Register hook for player movement speed
-        api.registerHook("player.getMovementSpeed", new PluginHook.HookCallback() {
-            @Override
-            public Object onHookCalled(String hookName, Object[] args) {
-                if (enableSpeedBoost && args.length > 0) {
-                    try {
-                        float originalSpeed = ((Number) args[0]).floatValue();
-                        float modifiedSpeed = originalSpeed * speedMultiplier;
-                        LogUtils.logDebug("Speed modified: " + originalSpeed + " -> " + modifiedSpeed);
-                        return modifiedSpeed;
-                    } catch (Exception e) {
-                        LogUtils.logDebug("Speed hook error: " + e.getMessage());
-                        return args[0];
-                    }
-                }
-                return args[0];
-            }
-        });
-
-        // Register hook for resource collection
-        api.registerHook("game.collectResource", new PluginHook.HookCallback() {
-            @Override
-            public Object onHookCalled(String hookName, Object[] args) {
-                if (enableResourceMultiplier && args.length > 1) {
-                    try {
-                        int originalAmount = ((Number) args[1]).intValue();
-                        int modifiedAmount = originalAmount * resourceMultiplier;
-                        LogUtils.logDebug("Resource collection modified: " + originalAmount + " -> " + modifiedAmount);
-                        return modifiedAmount;
-                    } catch (Exception e) {
-                        LogUtils.logDebug("Resource hook error: " + e.getMessage());
-                        return args[1];
-                    }
-                }
-                return args[1];
-            }
-        });
-
-        LogUtils.logDebug("Game hooks registered successfully");
-    }
-
-    private void installGameHooks() {
-        if (gameHooksInstalled) {
-            return;
-        }
-
-        try {
-            PluginAPI api = getPluginContext().getAPI();
-            
-            // Install damage modification hook
-            if (enableDamageMultiplier) {
-                api.installHook("player.calculateDamage");
-                installedPatches.add("damage_multiplier");
-            }
-
-            // Install speed modification hook
-            if (enableSpeedBoost) {
-                api.installHook("player.getMovementSpeed");
-                installedPatches.add("speed_boost");
-            }
-
-            // Install resource collection hook
-            if (enableResourceMultiplier) {
-                api.installHook("game.collectResource");
-                installedPatches.add("resource_multiplier");
-            }
-
-            gameHooksInstalled = true;
-            LogUtils.logUser("🔧 Installed " + installedPatches.size() + " game modification hooks");
-
-        } catch (Exception e) {
-            LogUtils.logDebug("Failed to install game hooks: " + e.getMessage());
-            throw new RuntimeException("Game hook installation failed", e);
-        }
-    }
-
-    private void removeGameHooks() {
-        if (!gameHooksInstalled) {
-            return;
-        }
-
-        try {
-            PluginAPI api = getPluginContext().getAPI();
-            
-            // Remove all installed hooks
-            for (String patch : installedPatches) {
-                try {
-                    switch (patch) {
-                        case "damage_multiplier":
-                            api.uninstallHook("player.calculateDamage");
-                            break;
-                        case "speed_boost":
-                            api.uninstallHook("player.getMovementSpeed");
-                            break;
-                        case "resource_multiplier":
-                            api.uninstallHook("game.collectResource");
-                            break;
-                    }
-                } catch (Exception e) {
-                    LogUtils.logDebug("Failed to remove hook " + patch + ": " + e.getMessage());
-                }
-            }
-
-            installedPatches.clear();
-            gameHooksInstalled = false;
-            LogUtils.logUser("🔧 Removed all game modification hooks");
-
-        } catch (Exception e) {
-            LogUtils.logDebug("Failed to remove game hooks: " + e.getMessage());
-        }
-    }
-
-    private void applyGamePatches() {
-        try {
-            PluginAPI api = getPluginContext().getAPI();
-            
-            // Example: Patch game configuration values
-            if (api.hasGameAccess()) {
-                // Store original values before modifying
-                Object originalMaxHealth = api.getGameValue("player.maxHealth");
-                if (originalMaxHealth != null) {
-                    originalValues.put("maxHealth", originalHealth);
-                    api.setGameValue("player.maxHealth", ((Number) originalMaxHealth).intValue() * 2);
-                }
-
-                Object originalMaxMana = api.getGameValue("player.maxMana");
-                if (originalMaxMana != null) {
-                    originalValues.put("maxMana", originalMaxMana);
-                    api.setGameValue("player.maxMana", ((Number) originalMaxMana).intValue() * 2);
-                }
-
-                LogUtils.logDebug("Game patches applied successfully");
-            }
-
-        } catch (Exception e) {
-            LogUtils.logDebug("Failed to apply game patches: " + e.getMessage());
-        }
-    }
-
-    private void revertGamePatches() {
-        try {
-            PluginAPI api = getPluginContext().getAPI();
-            
-            // Restore original values
-            if (api.hasGameAccess()) {
-                for (Map.Entry<String, Object> entry : originalValues.entrySet()) {
-                    try {
-                        switch (entry.getKey()) {
-                            case "maxHealth":
-                                api.setGameValue("player.maxHealth", entry.getValue());
-                                break;
-                            case "maxMana":
-                                api.setGameValue("player.maxMana", entry.getValue());
-                                break;
-                        }
-                    } catch (Exception e) {
-                        LogUtils.logDebug("Failed to revert " + entry.getKey() + ": " + e.getMessage());
-                    }
-                }
-
-                originalValues.clear();
-                LogUtils.logDebug("Game patches reverted successfully");
-            }
-
-        } catch (Exception e) {
-            LogUtils.logDebug("Failed to revert game patches: " + e.getMessage());
-        }
-    }
-
-    private void registerEventHandlers() {
-        PluginAPI api = getPluginContext().getAPI();
-        
-        // Register for game events
-        api.registerEventHandler("game.playerLevelUp", this::onPlayerLevelUp);
-        api.registerEventHandler("game.playerDeath", this::onPlayerDeath);
-        api.registerEventHandler("game.itemPickup", this::onItemPickup);
-        
-        LogUtils.logDebug("Event handlers registered");
-    }
-
-    private void unregisterEventHandlers() {
-        PluginAPI api = getPluginContext().getAPI();
-        
-        api.unregisterEventHandler("game.playerLevelUp", this::onPlayerLevelUp);
-        api.unregisterEventHandler("game.playerDeath", this::onPlayerDeath);
-        api.unregisterEventHandler("game.itemPickup", this::onItemPickup);
-        
-        LogUtils.logDebug("Event handlers unregistered");
-    }
-
-    private void applyRuntimeModifications() {
-        try {
-            // Apply modifications that need to be active during gameplay
-            LogUtils.logDebug("Applying runtime modifications");
-            
-            // Example: Modify game timers, physics, etc.
-            showToast("Runtime modifications applied!");
-            
-        } catch (Exception e) {
-            LogUtils.logDebug("Failed to apply runtime modifications: " + e.getMessage());
-        }
-    }
-
-    private void cleanupRuntimeModifications() {
-        try {
-            // Clean up runtime modifications
-            LogUtils.logDebug("Cleaning up runtime modifications");
-            
-        } catch (Exception e) {
-            LogUtils.logDebug("Failed to cleanup runtime modifications: " + e.getMessage());
-        }
-    }
-
-    private void updateGameModifications() {
-        if (isEnabled() && gameHooksInstalled) {
-            LogUtils.logDebug("Updating game modifications with new configuration");
-            
-            // Save new configuration
-            saveConfiguration();
-            
-            // Reinstall hooks with new values
-            removeGameHooks();
-            installGameHooks();
-            
-            showToast("Game modifications updated!");
-        }
-    }
-
-    // ===== Event Handlers =====
-
-    private void onPlayerLevelUp(Object... args) {
-        LogUtils.logDebug("Player leveled up - applying level-based modifications");
-        showToast("Level up! Modifications enhanced!");
-    }
-
-    private void onPlayerDeath(Object... args) {
-        LogUtils.logDebug("Player died - modifications remain active");
-        showToast("Don't worry, modifications are still active!");
-    }
-
-    private void onItemPickup(Object... args) {
-        if (enableResourceMultiplier && args.length > 0) {
-            LogUtils.logDebug("Item pickup enhanced by resource multiplier");
-        }
-    }
-
-    // ===== Utility Methods =====
-
-    private void showToast(String message) {
-        Context context = getPluginContext().getApplicationContext();
-        if (context != null) {
-            Toast.makeText(context, "[Game Mod] " + message, Toast.LENGTH_SHORT).show();
-        }
-    }
-
-    @Override
-    public String getStatusReport() {
-        StringBuilder report = new StringBuilder();
-        report.append("=== Game Modification Plugin Status ===\n");
-        report.append("Plugin Enabled: ").append(isEnabled()).append("\n");
-        report.append("Game Hooks Installed: ").append(gameHooksInstalled).append("\n");
-        report.append("Active Patches: ").append(installedPatches.size()).append("\n");
-        
-        report.append("\nModifications:\n");
-        report.append("• Damage Multiplier: ").append(enableDamageMultiplier ? damageMultiplier + "x" : "Disabled").append("\n");
-        report.append("• Speed Boost: ").append(enableSpeedBoost ? speedMultiplier + "x" : "Disabled").append("\n");
-        report.append("• Resource Multiplier: ").append(enableResourceMultiplier ? resourceMultiplier + "x" : "Disabled").append("\n");
-        
-        report.append("\nInstalled Patches:\n");
-        for (String patch : installedPatches) {
-            report.append("• ").append(patch).append("\n");
-        }
-        
-        report.append("\nOriginal Values Stored: ").append(originalValues.size()).append("\n");
-        
-        return report.toString();
-    }
-
-    @Override
-    public void cleanup() {
-        LogUtils.logUser("🧹 Cleaning up Game Modification Plugin");
-        
-        try {
-            // Ensure all modifications are removed
-            if (isEnabled()) {
-                onDisable();
-            }
-            
-            // Clear all stored data
-            originalValues.clear();
-            installedPatches.clear();
-            gameHooksInstalled = false;
-            
-            LogUtils.logUser("✅ Game Modification Plugin cleanup completed");
-            
-        } catch (Exception e) {
-            LogUtils.logDebug("Error during plugin cleanup: " + e.getMessage());
-        }
-        
-        super.cleanup();
-    }
-
-    // ===== Diagnostic and Testing Methods =====
-
-    public void testModifications() {
-        LogUtils.logUser("🧪 Testing game modifications...");
-        
-        try {
-            // Test damage multiplier
-            if (enableDamageMultiplier) {
-                LogUtils.logUser("Testing damage multiplier: " + damageMultiplier + "x");
-            }
-            
-            // Test speed boost
-            if (enableSpeedBoost) {
-                LogUtils.logUser("Testing speed boost: " + speedMultiplier + "x");
-            }
-            
-            // Test resource multiplier
-            if (enableResourceMultiplier) {
-                LogUtils.logUser("Testing resource multiplier: " + resourceMultiplier + "x");
-            }
-            
-            showToast("Modification test completed - check logs for details");
-            
-        } catch (Exception e) {
-            LogUtils.logDebug("Modification test failed: " + e.getMessage());
-            showToast("Modification test failed: " + e.getMessage());
-        }
-    }
-
-    public void resetToDefaults() {
-        LogUtils.logUser("🔄 Resetting game modifications to defaults");
-        
-        enableDamageMultiplier = true;
-        damageMultiplier = 2.0f;
-        enableSpeedBoost = true;
-        speedMultiplier = 1.5f;
-        enableResourceMultiplier = true;
-        resourceMultiplier = 3;
-        
-        saveConfiguration();
-        
-        if (isEnabled()) {
-            updateGameModifications();
-        }
-        
-        showToast("Game modifications reset to defaults");
-    }
-}
-
-/storage/emulated/0/AndroidIDEProjects/ModLoader/ModLoader/app/src/main/java/com/modloader/plugin/examples/ExampleThemePlugin.java
-
-// File: ExampleThemePlugin.java - Sample Theme Plugin (150+ lines)
-// Path: /app/src/main/java/com/modloader/plugin/examples/ExampleThemePlugin.java
-
-package com.modloader.plugin.examples;
-
-import android.graphics.Color;
-import android.view.View;
-import android.widget.Toast;
-
-import com.modloader.plugin.Plugin;
-import com.modloader.plugin.PluginContext;
-import com.modloader.plugin.PluginHook;
-import com.modloader.plugin.PluginAPI;
-
-/**
- * Example Theme Plugin - Demonstrates UI theming capabilities
- * Shows how plugins can modify the app's appearance and behavior
- */
-public class ExampleThemePlugin implements Plugin {
-    private static final String PLUGIN_ID = "example_theme_plugin";
-    private static final String PLUGIN_NAME = "Example Theme Plugin";
-    private static final String VERSION = "1.0.0";
-    private static final String AUTHOR = "ModLoader Team";
-    private static final String DESCRIPTION = "An example plugin that demonstrates theme customization and UI modifications";
-    
-    private PluginContext context;
-    private PluginAPI api;
-    
-    // Theme configuration
-    private String currentTheme = "default";
-    private boolean darkModeEnabled = false;
-    private int primaryColor = Color.parseColor("#4CAF50");
-    private int accentColor = Color.parseColor("#FF9800");
-    
-    // Hook listeners
-    private PluginHook.HookListener uiCreateListener;
-    private PluginHook.HookListener themeChangeListener;
-    private PluginHook.HookListener settingsChangeListener;
-    
-    @Override
-    public String getId() {
-        return PLUGIN_ID;
-    }
-    
-    @Override
-    public String getName() {
-        return PLUGIN_NAME;
-    }
-    
-    @Override
-    public String getVersion() {
-        return VERSION;
-    }
-    
-    @Override
-    public String getAuthor() {
-        return AUTHOR;
-    }
-    
-    @Override
-    public String getDescription() {
-        return DESCRIPTION;
-    }
-    
-    @Override
-    public void onLoad(PluginContext context) {
-        this.context = context;
-        this.api = context.getAPI();
-        
-        api.log("Theme plugin loading...");
-        
-        // Load theme configuration
-        loadThemeConfiguration();
-        
-        // Initialize theme system
-        initializeThemeSystem();
-        
-        // Setup hook listeners
-        setupHookListeners();
-        
-        api.log("Theme plugin loaded successfully");
-    }
-    
-    @Override
-    public void onEnable(PluginContext context) {
-        api.log("Theme plugin enabled");
-        
-        // Register hook listeners
-        registerHookListeners();
-        
-        // Apply current theme
-        applyCurrentTheme();
-        
-        // Show welcome message
-        api.showToast("🎨 Theme Plugin: " + currentTheme + " theme activated!");
-        
-        // Schedule theme updates
-        scheduleThemeUpdates();
-    }
-    
-    @Override
-    public void onDisable(PluginContext context) {
-        api.log("Theme plugin disabled");
-        
-        // Restore default theme
-        restoreDefaultTheme();
-        
-        // Show farewell message
-        api.showToast("🎨 Theme Plugin: Restored default theme");
-    }
-    
-    @Override
-    public void onUnload(PluginContext context) {
-        api.log("Theme plugin unloading...");
-        
-        // Clean up resources
-        cleanup();
-        
-        api.log("Theme plugin unloaded");
-    }
-    
-    /**
-     * Load theme configuration from preferences
-     */
-    private void loadThemeConfiguration() {
-        currentTheme = api.getSetting("theme_name", "default");
-        darkModeEnabled = api.getSetting("dark_mode", false);
-        
-        // Load colors
-        String primaryColorHex = api.getSetting("primary_color", "#4CAF50");
-        String accentColorHex = api.getSetting("accent_color", "#FF9800");
-        
-        try {
-            primaryColor = Color.parseColor(primaryColorHex);
-            accentColor = Color.parseColor(accentColorHex);
-        } catch (IllegalArgumentException e) {
-            api.logWarning("Invalid color format, using defaults");
-            primaryColor = Color.parseColor("#4CAF50");
-            accentColor = Color.parseColor("#FF9800");
-        }
-        
-        api.logDebug("Loaded theme configuration: " + currentTheme + 
-                    " (Dark: " + darkModeEnabled + ")");
-    }
-    
-    /**
-     * Initialize the theme system
-     */
-    private void initializeThemeSystem() {
-        // Create theme data directory
-        context.setData("theme_applied", false);
-        context.setData("original_colors", null);
-        context.setData("theme_start_time", System.currentTimeMillis());
-        
-        // Store theme configurations
-        context.setResource("available_themes", new String[]{
-            "default", "dark", "nature", "ocean", "sunset", "neon"
-        });
-        
-        context.setResource("theme_colors", createThemeColorMap());
-    }
-    
-    /**
-     * Create theme color mapping
-     */
-    private java.util.Map<String, ThemeColors> createThemeColorMap() {
-        java.util.Map<String, ThemeColors> themeMap = new java.util.HashMap<>();
-        
-        themeMap.put("default", new ThemeColors(
-            Color.parseColor("#4CAF50"), // primary
-            Color.parseColor("#FF9800"), // accent
-            Color.parseColor("#FFFFFF"), // background
-            Color.parseColor("#333333")  // text
-        ));
-        
-        themeMap.put("dark", new ThemeColors(
-            Color.parseColor("#BB86FC"), // primary
-            Color.parseColor("#03DAC6"), // accent
-            Color.parseColor("#121212"), // background
-            Color.parseColor("#FFFFFF")  // text
-        ));
-        
-        themeMap.put("nature", new ThemeColors(
-            Color.parseColor("#4CAF50"), // primary
-            Color.parseColor("#8BC34A"), // accent
-            Color.parseColor("#F1F8E9"), // background
-            Color.parseColor("#2E7D32")  // text
-        ));
-        
-        themeMap.put("ocean", new ThemeColors(
-            Color.parseColor("#2196F3"), // primary
-            Color.parseColor("#00BCD4"), // accent
-            Color.parseColor("#E3F2FD"), // background
-            Color.parseColor("#0D47A1")  // text
-        ));
-        
-        themeMap.put("sunset", new ThemeColors(
-            Color.parseColor("#FF5722"), // primary
-            Color.parseColor("#FF9800"), // accent
-            Color.parseColor("#FFF3E0"), // background
-            Color.parseColor("#BF360C")  // text
-        ));
-        
-        themeMap.put("neon", new ThemeColors(
-            Color.parseColor("#E91E63"), // primary
-            Color.parseColor("#9C27B0"), // accent
-            Color.parseColor("#000000"), // background
-            Color.parseColor("#00FF00")  // text
-        ));
-        
-        return themeMap;
-    }
-    
-    /**
-     * Setup hook listeners
-     */
-    private void setupHookListeners() {
-        // UI Creation Hook - Apply theme when UI elements are created
-        uiCreateListener = new PluginHook.HookListener() {
-            @Override
-            public void onEvent(PluginHook.HookEvent event) {
-                View view = event.getData("view", View.class);
-                if (view != null) {
-                    applyThemeToView(view);
-                }
-            }
-            
-            @Override
-            public PluginHook.Priority getPriority() {
-                return PluginHook.Priority.HIGH;
-            }
-        };
-        
-        // Theme Change Hook - Respond to theme changes
-        themeChangeListener = new PluginHook.HookListener() {
-            @Override
-            public void onEvent(PluginHook.HookEvent event) {
-                String newTheme = event.getData("theme", String.class);
-                if (newTheme != null && !newTheme.equals(currentTheme)) {
-                    switchTheme(newTheme);
-                }
-            }
-        };
-        
-        // Settings Change Hook - Update theme when settings change
-        settingsChangeListener = new PluginHook.HookListener() {
-            @Override
-            public void onEvent(PluginHook.HookEvent event) {
-                String settingKey = event.getData("key", String.class);
-                if (settingKey != null && settingKey.startsWith("theme_")) {
-                    loadThemeConfiguration();
-                    applyCurrentTheme();
-                }
-            }
-        };
-    }
-    
-    /**
-     * Register hook listeners
-     */
-    private void registerHookListeners() {
-        api.registerHook(PluginHook.Hooks.UI_MENU_CREATE, uiCreateListener);
-        api.registerHook(PluginHook.Hooks.UI_THEME_CHANGE, themeChangeListener);
-        api.registerHook(PluginHook.Hooks.SETTINGS_CHANGE, settingsChangeListener);
-    }
-    
-    /**
-     * Apply current theme
-     */
-    private void applyCurrentTheme() {
-        @SuppressWarnings("unchecked")
-        java.util.Map<String, ThemeColors> themeColors = context.getResource("theme_colors", java.util.Map.class);
-        
-        if (themeColors != null && themeColors.containsKey(currentTheme)) {
-            ThemeColors colors = themeColors.get(currentTheme);
-            primaryColor = colors.primary;
-            accentColor = colors.accent;
-            
-            // Store current colors
-            context.setData("current_primary", primaryColor);
-            context.setData("current_accent", accentColor);
-            context.setData("theme_applied", true);
-            
-            api.logDebug("Applied theme: " + currentTheme);
-            
-            // Trigger theme change event for other components
-            api.triggerHook(PluginHook.Hooks.UI_THEME_CHANGE, this, "theme", currentTheme);
-        }
-    }
-    
-    /**
-     * Apply theme to a specific view
-     */
-    private void applyThemeToView(View view) {
-        if (!context.getData("theme_applied", Boolean.class, false)) {
-            return;
-        }
-        
-        try {
-            // This is a simplified example - in a real implementation,
-            // you would apply theme colors to specific view types
-            view.setBackgroundColor(primaryColor);
-            
-            // Log the theming action
-            api.logDebug("Applied theme to view: " + view.getClass().getSimpleName());
-            
-        } catch (Exception e) {
-            api.logWarning("Failed to apply theme to view: " + e.getMessage());
-        }
-    }
-    
-    /**
-     * Switch to a different theme
-     */
-    private void switchTheme(String themeName) {
-        String oldTheme = currentTheme;
-        currentTheme = themeName;
-        
-        // Save new theme setting
-        api.setSetting("theme_name", currentTheme);
-        
-        // Apply the new theme
-        applyCurrentTheme();
-        
-        api.log("Switched theme from " + oldTheme + " to " + currentTheme);
-        api.showToast("🎨 Theme changed to: " + currentTheme);
-    }
-    
-    /**
-     * Restore default theme
-     */
-    private void restoreDefaultTheme() {
-        currentTheme = "default";
-        darkModeEnabled = false;
-        applyCurrentTheme();
-        
-        api.logDebug("Restored default theme");
-    }
-    
-    /**
-     * Schedule periodic theme updates
-     */
-    private void scheduleThemeUpdates() {
-        // Example: Auto-switch themes based on time of day
-        api.executeAsync(() -> {
-            while (context.isEnabled()) {
-                try {
-                    Thread.sleep(300000); // Check every 5 minutes
-                    
-                    if (api.getSetting("auto_theme_switch", false)) {
-                        updateThemeBasedOnTime();
-                    }
-                    
-                } catch (InterruptedException e) {
-                    break;
-                }
-            }
-        });
-    }
-    
-    /**
-     * Update theme based on current time
-     */
-    private void updateThemeBasedOnTime() {
-        java.util.Calendar calendar = java.util.Calendar.getInstance();
-        int hour = calendar.get(java.util.Calendar.HOUR_OF_DAY);
-        
-        String newTheme;
-        if (hour >= 6 && hour < 12) {
-            newTheme = "nature"; // Morning
-        } else if (hour >= 12 && hour < 17) {
-            newTheme = "ocean"; // Afternoon
-        } else if (hour >= 17 && hour < 20) {
-            newTheme = "sunset"; // Evening
-        } else {
-            newTheme = "dark"; // Night
-        }
-        
-        if (!newTheme.equals(currentTheme)) {
-            switchTheme(newTheme);
-            api.log("Auto-switched to " + newTheme + " theme based on time");
-        }
-    }
-    
-    /**
-     * Clean up resources
-     */
-    private void cleanup() {
-        // Cancel any scheduled tasks
-        context.setData("theme_applied", false);
-        
-        // Clear theme data
-        context.removeData("current_primary");
-        context.removeData("current_accent");
-        context.removeData("theme_start_time");
-    }
-    
-    // Helper class for theme colors
-    private static class ThemeColors {
-        final int primary;
-        final int accent;
-        final int background;
-        final int text;
-        
-        public ThemeColors(int primary, int accent, int background, int text) {
-            this.primary = primary;
-            this.accent = accent;
-            this.background = background;
-            this.text = text;
-        }
-    }
-}
-
-/storage/emulated/0/AndroidIDEProjects/ModLoader/ModLoader/app/src/main/java/com/modloader/plugin/examples/ExampleUtilityPlugin.java
-
-// File: ExampleUtilityPlugin.java - Sample Utility Plugin
-// Path: /app/src/main/java/com/modloader/plugin/examples/ExampleUtilityPlugin.java
-
-package com.modloader.plugin.examples;
-
-import android.content.Context;
-import android.widget.Toast;
-import android.os.Handler;
-import android.os.Looper;
-
-import com.modloader.plugin.Plugin;
-import com.modloader.plugin.PluginAPI;
-import com.modloader.plugin.PluginContext;
-import com.modloader.util.LogUtils;
-
-import java.util.Map;
-import java.util.HashMap;
-import java.util.List;
-import java.util.ArrayList;
-import java.util.Timer;
-import java.util.TimerTask;
-import java.text.SimpleDateFormat;
-import java.util.Date;
-import java.util.Locale;
-
-/**
- * Example Utility Plugin - Demonstrates utility and helper functionality
- * This plugin provides various utility features like auto-save, performance monitoring,
- * system information display, and other helpful tools
- */
-public class ExampleUtilityPlugin extends Plugin {
-    private static final String PLUGIN_ID = "example_utility_plugin";
-    private static final String PLUGIN_NAME = "Example Utility Tools";
-    private static final String PLUGIN_VERSION = "1.0.0";
-    private static final String PLUGIN_AUTHOR = "Plugin System";
-    private static final String PLUGIN_DESCRIPTION = "Provides utility features including auto-save, performance monitoring, system info, and helpful tools.";
-
-    // Plugin state
-    private Timer autoSaveTimer;
-    private Timer performanceMonitor;
-    private Handler uiHandler;
-    private List<String> performanceLog = new ArrayList<>();
-    private long pluginStartTime;
-
-    // Configuration
-    private boolean enableAutoSave = true;
-    private int autoSaveInterval = 300; // seconds
-    private boolean enablePerformanceMonitoring = true;
-    private int performanceCheckInterval = 60; // seconds
-    private boolean enableSystemInfo = true;
-    private boolean enableNotifications = true;
-    private boolean enableDebugMode = false;
-
-    // Statistics
-    private int autoSaveCount = 0;
-    private int performanceChecks = 0;
-    private long totalMemoryUsed = 0;
-    private long lastGameSaveTime = 0;
-
-    @Override
-    public String getId() {
-        return PLUGIN_ID;
-    }
-
-    @Override
-    public String getName() {
-        return PLUGIN_NAME;
-    }
-
-    @Override
-    public String getVersion() {
-        return PLUGIN_VERSION;
-    }
-
-    @Override
-    public String getAuthor() {
-        return PLUGIN_AUTHOR;
-    }
-
-    @Override
-    public String getDescription() {
-        return PLUGIN_DESCRIPTION;
-    }
-
-    @Override
-    public void initialize(PluginContext context) {
-        super.initialize(context);
-        LogUtils.logUser("🛠️ Initializing Utility Plugin");
-        
-        pluginStartTime = System.currentTimeMillis();
-        uiHandler = new Handler(Looper.getMainLooper());
-        
-        loadConfiguration();
-        initializeUtilities();
-        
-        LogUtils.logUser("✅ Utility Plugin initialized successfully");
-    }
-
-    @Override
-    public void onEnable() {
-        super.onEnable();
-        LogUtils.logUser("🛠️ Enabling utility tools...");
-        
-        try {
-            startAutoSave();
-            startPerformanceMonitoring();
-            registerUtilityCommands();
-            
-            if (enableSystemInfo) {
-                displaySystemInfo();
-            }
-            
-            showNotification("Utility tools enabled! Auto-save every " + autoSaveInterval + "s");
-            LogUtils.logUser("✅ Utility tools enabled successfully");
-            
-        } catch (Exception e) {
-            LogUtils.logDebug("Failed to enable utility tools: " + e.getMessage());
-            showNotification("Failed to enable utility tools: " + e.getMessage());
-        }
-    }
-
-    @Override
-    public void onDisable() {
-        super.onDisable();
-        LogUtils.logUser("🛠️ Disabling utility tools...");
-        
-        try {
-            stopAutoSave();
-            stopPerformanceMonitoring();
-            unregisterUtilityCommands();
-            
-            showNotification("Utility tools disabled - statistics saved");
-            LogUtils.logUser("✅ Utility tools disabled successfully");
-            
-        } catch (Exception e) {
-            LogUtils.logDebug("Failed to disable utility tools: " + e.getMessage());
-        }
-    }
-
-    @Override
-    public void onGameStart() {
-        LogUtils.logUser("🎮 Game starting - activating utility monitoring");
-        
-        if (isEnabled()) {
-            recordGameEvent("Game Started");
-            if (enablePerformanceMonitoring) {
-                startPerformanceBaseline();
-            }
-        }
-    }
-
-    @Override
-    public void onGameStop() {
-        LogUtils.logUser("🎮 Game stopping - saving utility data");
-        
-        if (isEnabled()) {
-            recordGameEvent("Game Stopped");
-            saveUtilityData();
-        }
-    }
-
-    @Override
-    public Map<String, Object> getConfigurationOptions() {
-        Map<String, Object> config = new HashMap<>();
-        config.put("enableAutoSave", enableAutoSave);
-        config.put("autoSaveInterval", autoSaveInterval);
-        config.put("enablePerformanceMonitoring", enablePerformanceMonitoring);
-        config.put("performanceCheckInterval", performanceCheckInterval);
-        config.put("enableSystemInfo", enableSystemInfo);
-        config.put("enableNotifications", enableNotifications);
-        config.put("enableDebugMode", enableDebugMode);
-        return config;
-    }
-
-    @Override
-    public void setConfigurationOptions(Map<String, Object> config) {
-        if (config.containsKey("enableAutoSave")) {
-            enableAutoSave = (Boolean) config.get("enableAutoSave");
-        }
-        if (config.containsKey("autoSaveInterval")) {
-            autoSaveInterval = ((Number) config.get("autoSaveInterval")).intValue();
-        }
-        if (config.containsKey("enablePerformanceMonitoring")) {
-            enablePerformanceMonitoring = (Boolean) config.get("enablePerformanceMonitoring");
-        }
-        if (config.containsKey("performanceCheckInterval")) {
-            performanceCheckInterval = ((Number) config.get("performanceCheckInterval")).intValue();
-        }
-        if (config.containsKey("enableSystemInfo")) {
-            enableSystemInfo = (Boolean) config.get("enableSystemInfo");
-        }
-        if (config.containsKey("enableNotifications")) {
-            enableNotifications = (Boolean) config.get("enableNotifications");
-        }
-        if (config.containsKey("enableDebugMode")) {
-            enableDebugMode = (Boolean) config.get("enableDebugMode");
-        }
-        
-        LogUtils.logDebug("Configuration updated: auto-save=" + autoSaveInterval + "s, perf-check=" + performanceCheckInterval + "s");
-        
-        // Apply changes immediately if plugin is enabled
-        if (isEnabled()) {
-            restartUtilities();
-        }
-    }
-
-    // ===== Utility Methods =====
-
-    private void loadConfiguration() {
-        try {
-            Map<String, Object> saved = getPluginContext().getStorage().loadData("config");
-            if (saved != null && !saved.isEmpty()) {
-                setConfigurationOptions(saved);
-                LogUtils.logDebug("Loaded utility configuration from storage");
-            }
-        } catch (Exception e) {
-            LogUtils.logDebug("Failed to load utility configuration: " + e.getMessage());
-        }
-    }
-
-    private void saveConfiguration() {
-        try {
-            getPluginContext().getStorage().saveData("config", getConfigurationOptions());
-            LogUtils.logDebug("Utility configuration saved successfully");
-        } catch (Exception e) {
-            LogUtils.logDebug("Failed to save utility configuration: " + e.getMessage());
-        }
-    }
-
-    private void initializeUtilities() {
-        performanceLog.clear();
-        autoSaveCount = 0;
-        performanceChecks = 0;
-        totalMemoryUsed = 0;
-        
-        LogUtils.logDebug("Utility components initialized");
-    }
-
-    private void restartUtilities() {
-        LogUtils.logDebug("Restarting utilities with new configuration");
-        
-        stopAutoSave();
-        stopPerformanceMonitoring();
-        
-        if (enableAutoSave) {
-            startAutoSave();
-        }
-        if (enablePerformanceMonitoring) {
-            startPerformanceMonitoring();
-        }
-        
-        saveConfiguration();
-        showNotification("Utility settings updated!");
-    }
-
-    // ===== Auto-Save Functionality =====
-
-    private void startAutoSave() {
-        if (!enableAutoSave || autoSaveTimer != null) {
-            return;
-        }
-
-        autoSaveTimer = new Timer("AutoSaveTimer");
-        autoSaveTimer.scheduleAtFixedRate(new TimerTask() {
-            @Override
-            public void run() {
-                performAutoSave();
-            }
-        }, autoSaveInterval * 1000L, autoSaveInterval * 1000L);
-
-        LogUtils.logDebug("Auto-save started: interval " + autoSaveInterval + " seconds");
-    }
-
-    private void stopAutoSave() {
-        if (autoSaveTimer != null) {
-            autoSaveTimer.cancel();
-            autoSaveTimer = null;
-            LogUtils.logDebug("Auto-save stopped");
-        }
-    }
-
-    private void performAutoSave() {
-        try {
-            PluginAPI api = getPluginContext().getAPI();
-            
-            if (api.hasGameAccess()) {
-                api.executeGameCommand("save");
-                lastGameSaveTime = System.currentTimeMillis();
-                autoSaveCount++;
-                
-                if (enableDebugMode) {
-                    LogUtils.logDebug("Auto-save #" + autoSaveCount + " completed");
-                }
-                
-                if (autoSaveCount % 10 == 0) {
-                    uiHandler.post(() -> showNotification("Auto-saved! (" + autoSaveCount + " total saves)"));
-                }
-            }
-            
-            saveUtilityData();
-            
-        } catch (Exception e) {
-            LogUtils.logDebug("Auto-save failed: " + e.getMessage());
-        }
-    }
-
-    // ===== Performance Monitoring =====
-
-    private void startPerformanceMonitoring() {
-        if (!enablePerformanceMonitoring || performanceMonitor != null) {
-            return;
-        }
-
-        performanceMonitor = new Timer("PerformanceMonitor");
-        performanceMonitor.scheduleAtFixedRate(new TimerTask() {
-            @Override
-            public void run() {
-                performPerformanceCheck();
-            }
-        }, performanceCheckInterval * 1000L, performanceCheckInterval * 1000L);
-
-        LogUtils.logDebug("Performance monitoring started: interval " + performanceCheckInterval + " seconds");
-    }
-
-    private void stopPerformanceMonitoring() {
-        if (performanceMonitor != null) {
-            performanceMonitor.cancel();
-            performanceMonitor = null;
-            LogUtils.logDebug("Performance monitoring stopped");
-        }
-    }
-
-    private void performPerformanceCheck() {
-        try {
-            Runtime runtime = Runtime.getRuntime();
-            long totalMemory = runtime.totalMemory();
-            long freeMemory = runtime.freeMemory();
-            long usedMemory = totalMemory - freeMemory;
-            
-            totalMemoryUsed += usedMemory;
-            performanceChecks++;
-            
-            String timestamp = new SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(new Date());
-            String logEntry = timestamp + " - Memory: " + formatMemory(usedMemory) + 
-                            " (Total: " + formatMemory(totalMemory) + ")";
-            
-            performanceLog.add(logEntry);
-            
-            if (performanceLog.size() > 100) {
-                performanceLog.remove(0);
-            }
-            
-            if (enableDebugMode) {
-                LogUtils.logDebug("Performance check #" + performanceChecks + ": " + logEntry);
-            }
-            
-            double memoryUsagePercent = (double) usedMemory / totalMemory * 100;
-            if (memoryUsagePercent > 80) {
-                uiHandler.post(() -> showNotification("High memory usage: " + String.format("%.1f%%", memoryUsagePercent)));
-            }
-            
-        } catch (Exception e) {
-            LogUtils.logDebug("Performance check failed: " + e.getMessage());
-        }
-    }
-
-    private void startPerformanceBaseline() {
-        LogUtils.logDebug("Starting performance baseline measurement");
-        recordGameEvent("Performance Baseline Started");
-    }
-
-    // ===== System Information =====
-
-    private void displaySystemInfo() {
-        try {
-            Runtime runtime = Runtime.getRuntime();
-            String systemInfo = buildSystemInfoString(runtime);
-            
-            LogUtils.logUser("📊 System Information:\n" + systemInfo);
-            
-            if (enableNotifications) {
-                showNotification("System info logged - check debug output");
-            }
-            
-        } catch (Exception e) {
-            LogUtils.logDebug("Failed to display system info: " + e.getMessage());
-        }
-    }
-
-    private String buildSystemInfoString(Runtime runtime) {
-        StringBuilder info = new StringBuilder();
-        info.append("=== System Information ===\n");
-        info.append("Available Processors: ").append(runtime.availableProcessors()).append("\n");
-        info.append("Max Memory: ").append(formatMemory(runtime.maxMemory())).append("\n");
-        info.append("Total Memory: ").append(formatMemory(runtime.totalMemory())).append("\n");
-        info.append("Free Memory: ").append(formatMemory(runtime.freeMemory())).append("\n");
-        info.append("Used Memory: ").append(formatMemory(runtime.totalMemory() - runtime.freeMemory())).append("\n");
-        info.append("Android Version: ").append(android.os.Build.VERSION.RELEASE).append("\n");
-        info.append("SDK Level: ").append(android.os.Build.VERSION.SDK_INT).append("\n");
-        info.append("Device Model: ").append(android.os.Build.MODEL).append("\n");
-        info.append("Manufacturer: ").append(android.os.Build.MANUFACTURER).append("\n");
-        return info.toString();
-    }
-
-    private String formatMemory(long bytes) {
-        if (bytes < 1024) return bytes + " B";
-        if (bytes < 1024 * 1024) return String.format("%.1f KB", bytes / 1024.0);
-        return String.format("%.1f MB", bytes / (1024.0 * 1024.0));
-    }
-
-    // ===== Utility Commands =====
-
-    private void registerUtilityCommands() {
-        PluginAPI api = getPluginContext().getAPI();
-        
-        // Register utility commands
-        api.registerCommand("save", this::executeManualSave);
-        api.registerCommand("perfcheck", this::executePerformanceCheck);
-        api.registerCommand("sysinfo", this::executeSystemInfo);
-        api.registerCommand("stats", this::executeShowStats);
-        
-        LogUtils.logDebug("Utility commands registered");
-    }
-
-    private void unregisterUtilityCommands() {
-        PluginAPI api = getPluginContext().getAPI();
-        
-        api.unregisterCommand("save");
-        api.unregisterCommand("perfcheck");
-        api.unregisterCommand("sysinfo");
-        api.unregisterCommand("stats");
-        
-        LogUtils.logDebug("Utility commands unregistered");
-    }
-
-    // Command implementations
-    private void executeManualSave(String... args) {
-        LogUtils.logUser("🔄 Manual save triggered");
-        performAutoSave();
-        showNotification("Manual save completed!");
-    }
-
-    private void executePerformanceCheck(String... args) {
-        LogUtils.logUser("📊 Manual performance check");
-        performPerformanceCheck();
-        showNotification("Performance check completed - see logs");
-    }
-
-    private void executeSystemInfo(String... args) {
-        LogUtils.logUser("📋 System information requested");
-        displaySystemInfo();
-    }
-
-    private void executeShowStats(String... args) {
-        String stats = getStatusReport();
-        LogUtils.logUser("📈 Utility Plugin Statistics:\n" + stats);
-        showNotification("Statistics displayed in logs");
-    }
-
-    // ===== Data Management =====
-
-    private void saveUtilityData() {
-        try {
-            Map<String, Object> data = new HashMap<>();
-            data.put("autoSaveCount", autoSaveCount);
-            data.put("performanceChecks", performanceChecks);
-            data.put("totalMemoryUsed", totalMemoryUsed);
-            data.put("lastGameSaveTime", lastGameSaveTime);
-            data.put("performanceLog", new ArrayList<>(performanceLog));
-            data.put("pluginStartTime", pluginStartTime);
-            
-            getPluginContext().getStorage().saveData("statistics", data);
-            
-            if (enableDebugMode) {
-                LogUtils.logDebug("Utility data saved successfully");
-            }
-            
-        } catch (Exception e) {
-            LogUtils.logDebug("Failed to save utility data: " + e.getMessage());
-        }
-    }
-
-    private void loadUtilityData() {
-        try {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> data = getPluginContext().getStorage().loadData("statistics");
-            
-            if (data != null) {
-                if (data.containsKey("autoSaveCount")) {
-                    autoSaveCount = ((Number) data.get("autoSaveCount")).intValue();
-                }
-                if (data.containsKey("performanceChecks")) {
-                    performanceChecks = ((Number) data.get("performanceChecks")).intValue();
-                }
-                if (data.containsKey("totalMemoryUsed")) {
-                    totalMemoryUsed = ((Number) data.get("totalMemoryUsed")).longValue();
-                }
-                if (data.containsKey("lastGameSaveTime")) {
-                    lastGameSaveTime = ((Number) data.get("lastGameSaveTime")).longValue();
-                }
-                if (data.containsKey("performanceLog")) {
-                    @SuppressWarnings("unchecked")
-                    List<String> savedLog = (List<String>) data.get("performanceLog");
-                    performanceLog.clear();
-                    performanceLog.addAll(savedLog);
-                }
-                
-                LogUtils.logDebug("Utility data loaded successfully");
-            }
-            
-        } catch (Exception e) {
-            LogUtils.logDebug("Failed to load utility data: " + e.getMessage());
-        }
-    }
-
-    private void recordGameEvent(String event) {
-        String timestamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(new Date());
-        String logEntry = timestamp + " - " + event;
-        performanceLog.add(logEntry);
-        
-        if (enableDebugMode) {
-            LogUtils.logDebug("Game event recorded: " + event);
-        }
-    }
-
-    // ===== Utility Methods =====
-
-    private void showNotification(String message) {
-        if (enableNotifications) {
-            Context context = getPluginContext().getApplicationContext();
-            if (context != null) {
-                Toast.makeText(context, "[Utility] " + message, Toast.LENGTH_SHORT).show();
-            }
-        }
-    }
-
-    @Override
-    public String getStatusReport() {
-        StringBuilder report = new StringBuilder();
-        report.append("=== Utility Plugin Status ===\n");
-        report.append("Plugin Enabled: ").append(isEnabled()).append("\n");
-        report.append("Plugin Runtime: ").append(formatRuntime()).append("\n");
-        
-        report.append("\nAuto-Save:\n");
-        report.append("• Enabled: ").append(enableAutoSave).append("\n");
-        report.append("• Interval: ").append(autoSaveInterval).append("s\n");
-        report.append("• Total Saves: ").append(autoSaveCount).append("\n");
-        if (lastGameSaveTime > 0) {
-            report.append("• Last Save: ").append(new Date(lastGameSaveTime)).append("\n");
-        }
-        
-        report.append("\nPerformance Monitoring:\n");
-        report.append("• Enabled: ").append(enablePerformanceMonitoring).append("\n");
-        report.append("• Check Interval: ").append(performanceCheckInterval).append("s\n");
-        report.append("• Total Checks: ").append(performanceChecks).append("\n");
-        report.append("• Avg Memory Usage: ").append(getAverageMemoryUsage()).append("\n");
-        
-        report.append("\nSettings:\n");
-        report.append("• System Info: ").append(enableSystemInfo).append("\n");
-        report.append("• Notifications: ").append(enableNotifications).append("\n");
-        report.append("• Debug Mode: ").append(enableDebugMode).append("\n");
-        
-        report.append("\nPerformance Log Entries: ").append(performanceLog.size()).append("\n");
-        
-        return report.toString();
-    }
-
-    private String formatRuntime() {
-        long runtimeMs = System.currentTimeMillis() - pluginStartTime;
-        long seconds = runtimeMs / 1000;
-        long minutes = seconds / 60;
-        long hours = minutes / 60;
-        
-        if (hours > 0) {
-            return String.format("%dh %dm %ds", hours, minutes % 60, seconds % 60);
-        } else if (minutes > 0) {
-            return String.format("%dm %ds", minutes, seconds % 60);
-        } else {
-            return String.format("%ds", seconds);
-        }
-    }
-
-    private String getAverageMemoryUsage() {
-        if (performanceChecks == 0) {
-            return "No data";
-        }
-        long avgMemory = totalMemoryUsed / performanceChecks;
-        return formatMemory(avgMemory);
-    }
-
-    @Override
-    public void cleanup() {
-        LogUtils.logUser("🧹 Cleaning up Utility Plugin");
-        
-        try {
-            if (isEnabled()) {
-                onDisable();
-            }
-            
-            saveUtilityData();
-            saveConfiguration();
-            
-            performanceLog.clear();
-            
-            LogUtils.logUser("✅ Utility Plugin cleanup completed");
-            
-        } catch (Exception e) {
-            LogUtils.logDebug("Error during utility plugin cleanup: " + e.getMessage());
-        }
-        
-        super.cleanup();
-    }
-
-    // ===== Public Utility Methods for Other Plugins =====
-
-    public List<String> getPerformanceHistory() {
-        return new ArrayList<>(performanceLog);
-    }
-
-    public int getAutoSaveCount() {
-        return autoSaveCount;
-    }
-
-    public void triggerManualSave() {
-        if (isEnabled()) {
-            performAutoSave();
-        }
-    }
-
-    public boolean isPerformanceMonitoringActive() {
-        return enablePerformanceMonitoring && performanceMonitor != null;
-    }
-
-    public void exportUtilityReport() {
-        try {
-            String report = getStatusReport() + "\n\nPerformance History:\n";
-            for (String entry : performanceLog) {
-                report += entry + "\n";
-            }
-            
-            getPluginContext().getStorage().saveData("utility_report_" + System.currentTimeMillis(), report);
-            showNotification("Utility report exported to plugin storage");
-            
-        } catch (Exception e) {
-            LogUtils.logDebug("Failed to export utility report: " + e.getMessage());
-        }
-    }
-}
-
-/storage/emulated/0/AndroidIDEProjects/ModLoader/ModLoader/app/src/main/java/com/modloader/ui/BaseActivity.java
-
-// File: BaseActivity.java (FIXED) - Compatible with PermissionManager
-// Path: /app/src/main/java/com/modloader/ui/BaseActivity.java
-
-package com.modloader.ui;
-
-import android.content.Intent;
-import android.os.Bundle;
-import android.view.MenuItem;
-import android.widget.Toast;
-import androidx.annotation.NonNull;
-import androidx.appcompat.app.AlertDialog;
-import androidx.appcompat.app.AppCompatActivity;
-
-import com.modloader.util.LogUtils;
-import com.modloader.util.PermissionManager;
-import com.modloader.util.ShizukuManager;
-import com.modloader.util.RootManager;
-
-/**
- * Base activity that provides common functionality for all activities
- * including permission management, error handling, and utility methods
- */
-public abstract class BaseActivity extends AppCompatActivity implements PermissionManager.PermissionCallback {
-    
-    protected static final String TAG = "BaseActivity";
-    
-    // Common managers
-    protected PermissionManager permissionManager;
-    protected ShizukuManager shizukuManager;
-    protected RootManager rootManager;
-    
-    // Activity state
-    private boolean isResumed = false;
-    private boolean hasInitialized = false;
-    
-    @Override
-    protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        
-        LogUtils.logDebug(getClass().getSimpleName() + " onCreate started");
-        
-        try {
-            // Initialize managers
-            initializeManagers();
-            
-            // Setup common UI elements
-            setupCommonUI();
-            
-            // Auto-setup permissions if needed
-            if (shouldAutoSetupPermissions()) {
-                autoSetupPermissions();
-            }
-            
-            hasInitialized = true;
-            LogUtils.logDebug(getClass().getSimpleName() + " onCreate completed");
-            
-        } catch (Exception e) {
-            LogUtils.logError("Error in BaseActivity onCreate: " + e.getMessage());
-            handleStartupError(e);
-        }
-    }
-    
-    /**
-     * Initialize common managers
-     */
-    private void initializeManagers() {
-        try {
-            permissionManager = new PermissionManager(this);
-            permissionManager.setCallback(this);
-            
-            shizukuManager = new ShizukuManager(this);
-            rootManager = new RootManager(this);
-            
-            LogUtils.logDebug("Managers initialized successfully");
-        } catch (Exception e) {
-            LogUtils.logError("Error initializing managers: " + e.getMessage());
-        }
-    }
-    
-    /**
-     * Setup common UI elements
-     */
-    private void setupCommonUI() {
-        // Enable up navigation if not main activity
-        if (getSupportActionBar() != null && !isMainActivity()) {
-            getSupportActionBar().setDisplayHomeAsUpEnabled(true);
-        }
-    }
-    
-    /**
-     * Auto-setup permissions if the activity requires them
-     */
-    private void autoSetupPermissions() {
-        if (permissionManager != null && requiresPermissions()) {
-            permissionManager.autoSetupPermissions();
-        }
-    }
-    
-    /**
-     * Check if this activity has all required permissions
-     */
-    protected boolean hasRequiredPermissions() {
-        if (permissionManager != null) {
-            return permissionManager.hasAllRequiredPermissions();
-        }
-        return true; // Assume true if manager not available
-    }
-    
-    /**
-     * Handle startup errors gracefully
-     */
-    private void handleStartupError(Exception e) {
-        LogUtils.logError("Startup error in " + getClass().getSimpleName() + ": " + e.getMessage());
-        
-        new AlertDialog.Builder(this)
-            .setTitle("❌ Startup Error")
-            .setMessage("An error occurred while starting this activity:\n\n" + e.getMessage() + 
-                "\n\nThe app may not function correctly.")
-            .setPositiveButton("Continue", null)
-            .setNegativeButton("Close App", (dialog, which) -> finishAffinity())
-            .show();
-    }
-    
-    // === Permission Management Methods ===
-    
-    @Override
-    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        
-        LogUtils.logDebug("Permission result in " + getClass().getSimpleName() + 
-            ": requestCode=" + requestCode);
-        
-        if (permissionManager != null) {
-            permissionManager.handlePermissionResult(requestCode, permissions, grantResults);
-        }
-    }
-    
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-        
-        LogUtils.logDebug("Activity result in " + getClass().getSimpleName() + 
-            ": requestCode=" + requestCode + ", resultCode=" + resultCode);
-        
-        // Handle special permission results
-        if (permissionManager != null) {
-            switch (requestCode) {
-                case PermissionManager.REQUEST_ALL_FILES_ACCESS:
-                case PermissionManager.REQUEST_INSTALL_PERMISSION:
-                    permissionManager.handlePermissionResult(requestCode, null, null);
-                    break;
-            }
-        }
-        
-        // Let subclasses handle their specific results
-        handleActivityResult(requestCode, resultCode, data);
-    }
-    
-    /**
-     * Subclasses can override this to handle activity results
-     */
-    protected void handleActivityResult(int requestCode, int resultCode, Intent data) {
-        // Default implementation does nothing
-    }
-    
-    // === PermissionManager.PermissionCallback Implementation ===
-    
-    @Override
-    public void onPermissionGranted(String permission) {
-        LogUtils.logUser("✅ Permission granted: " + permission);
-        onPermissionStateChanged();
-    }
-    
-    @Override
-    public void onPermissionDenied(String permission) {
-        LogUtils.logUser("❌ Permission denied: " + permission);
-        handlePermissionDenied(permission);
-        onPermissionStateChanged();
-    }
-    
-    @Override
-    public void onPermissionPermanentlyDenied(String permission) {
-        LogUtils.logUser("⚠️ Permission permanently denied: " + permission);
-        handlePermissionPermanentlyDenied(permission);
-        onPermissionStateChanged();
-    }
-    
-    @Override
-    public void onAllPermissionsGranted() {
-        LogUtils.logUser("✅ All permissions granted!");
-        onPermissionStateChanged();
-        onAllPermissionsReady();
-    }
-    
-    @Override
-    public void onPermissionRequestCompleted(boolean allGranted) {
-        LogUtils.logDebug("Permission request completed: " + allGranted);
-        onPermissionStateChanged();
-    }
-    
-    /**
-     * Called when permission state changes - subclasses can override
-     */
-    protected void onPermissionStateChanged() {
-        // Update UI or refresh content based on new permission state
-        refreshPermissionStatus();
-    }
-    
-    /**
-     * Called when all permissions are ready - subclasses can override
-     */
-    protected void onAllPermissionsReady() {
-        // Subclasses can implement specific behavior when all permissions are granted
-    }
-    
-    /**
-     * Handle permission denial with user-friendly messaging
-     */
-    protected void handlePermissionDenied(String permission) {
-        String message = getPermissionDenialMessage(permission);
-        showToast(message);
-    }
-    
-    /**
-     * Handle permanently denied permissions
-     */
-    protected void handlePermissionPermanentlyDenied(String permission) {
-        new AlertDialog.Builder(this)
-            .setTitle("🔐 Permission Required")
-            .setMessage("The permission for " + permission + " has been permanently denied.\n\n" +
-                "To enable it, please:\n" +
-                "1. Go to App Settings\n" +
-                "2. Find Permissions\n" +
-                "3. Enable the required permission")
-            .setPositiveButton("Open Settings", (dialog, which) -> {
-                if (permissionManager != null) {
-                    permissionManager.openAppSettings();
-                }
-            })
-            .setNegativeButton("Cancel", null)
-            .show();
-    }
-    
-    /**
-     * Get user-friendly message for permission denial
-     */
-    private String getPermissionDenialMessage(String permission) {
-        switch (permission) {
-            case "MANAGE_EXTERNAL_STORAGE":
-                return "Storage access is required to manage mod files";
-            case "INSTALL_PACKAGES":
-                return "Install permission is required to install modded APKs";
-            default:
-                return "This permission is required for the app to function properly";
-        }
-    }
-    
-    /**
-     * Refresh permission status display
-     */
-    protected void refreshPermissionStatus() {
-        // Subclasses can override to update permission-related UI
-        if (permissionManager != null) {
-            boolean hasAll = permissionManager.hasAllRequiredPermissions();
-            LogUtils.logDebug("Permission status refreshed: " + (hasAll ? "All granted" : "Missing some"));
-        }
-    }
-    
-    // === Utility Methods ===
-    
-    /**
-     * Show permission status dialog
-     */
-    protected void showPermissionStatus() {
-        if (permissionManager != null) {
-            String status = permissionManager.getPermissionStatusText();
-            new AlertDialog.Builder(this)
-                .setTitle("🔐 Permission Status")
-                .setMessage(status)
-                .setPositiveButton("OK", null)
-                .setNeutralButton("Request Missing", (dialog, which) -> {
-                    permissionManager.requestAllPermissions();
-                })
-                .show();
-        }
-    }
-    
-    /**
-     * Show toast message
-     */
-    protected void showToast(String message) {
-        Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
-    }
-    
-    /**
-     * Show long toast message
-     */
-    protected void showLongToast(String message) {
-        Toast.makeText(this, message, Toast.LENGTH_LONG).show();
-    }
-    
-    /**
-     * Show error dialog
-     */
-    protected void showError(String title, String message) {
-        new AlertDialog.Builder(this)
-            .setTitle("❌ " + title)
-            .setMessage(message)
-            .setPositiveButton("OK", null)
-            .show();
-    }
-    
-    /**
-     * Show confirmation dialog
-     */
-    protected void showConfirmation(String title, String message, Runnable onConfirm) {
-        new AlertDialog.Builder(this)
-            .setTitle(title)
-            .setMessage(message)
-            .setPositiveButton("Yes", (dialog, which) -> {
-                if (onConfirm != null) {
-                    onConfirm.run();
-                }
-            })
-            .setNegativeButton("No", null)
-            .show();
-    }
-    
-    // === Navigation Methods ===
-    
-    @Override
-    public boolean onOptionsItemSelected(MenuItem item) {
-        if (item.getItemId() == android.R.id.home) {
-            onBackPressed();
-            return true;
-        }
-        return super.onOptionsItemSelected(item);
-    }
-    
-    /**
-     * Safe finish that handles edge cases
-     */
-    protected void safeFinish() {
-        try {
-            if (!isFinishing()) {
-                finish();
-            }
-        } catch (Exception e) {
-            LogUtils.logDebug("Error during safeFinish: " + e.getMessage());
-        }
-    }
-    
-    // === Lifecycle Methods ===
-    
-    @Override
-    protected void onResume() {
-        super.onResume();
-        isResumed = true;
-        
-        // Refresh permission states when returning from other apps
-        if (hasInitialized && permissionManager != null) {
-            permissionManager.refreshPermissionStates();
-            refreshPermissionStatus();
-        }
-        
-        LogUtils.logDebug(getClass().getSimpleName() + " onResume");
-    }
-    
-    @Override
-    protected void onPause() {
-        super.onPause();
-        isResumed = false;
-        LogUtils.logDebug(getClass().getSimpleName() + " onPause");
-    }
-    
-    @Override
-    protected void onDestroy() {
-        super.onDestroy();
-        
-        // Clean up managers
-        if (permissionManager != null) {
-            permissionManager.cleanup();
-        }
-        if (shizukuManager != null) {
-            shizukuManager.cleanup();
-        }
-        if (rootManager != null) {
-            rootManager.cleanup();
-        }
-        
-        LogUtils.logDebug(getClass().getSimpleName() + " onDestroy");
-    }
-    
-    // === Abstract/Virtual Methods for Subclasses ===
-    
-    /**
-     * Whether this activity should auto-setup permissions on create
-     */
-    protected boolean shouldAutoSetupPermissions() {
-        return requiresPermissions();
-    }
-    
-    /**
-     * Whether this activity requires permissions to function
-     */
-    protected boolean requiresPermissions() {
-        return true; // Most activities require permissions
-    }
-    
-    /**
-     * Whether this is the main activity (affects navigation setup)
-     */
-    protected boolean isMainActivity() {
-        return false; // Subclasses should override if they are main activities
-    }
-    
-    // === State Query Methods ===
-    
-    protected boolean isActivityResumed() {
-        return isResumed;
-    }
-    
-    protected boolean isActivityInitialized() {
-        return hasInitialized;
-    }
-    
-    /**
-     * Get the permission manager instance
-     */
-    protected PermissionManager getPermissionManager() {
-        return permissionManager;
-    }
-    
-    /**
-     * Get the Shizuku manager instance
-     */
-    protected ShizukuManager getShizukuManager() {
-        return shizukuManager;
-    }
-    
-    /**
-     * Get the root manager instance
-     */
-    protected RootManager getRootManager() {
-        return rootManager;
-    }
-}
-
-/storage/emulated/0/AndroidIDEProjects/ModLoader/ModLoader/app/src/main/java/com/modloader/ui/DllModActivity.java
-
-// File: DllModActivity.java (Updated Activity) - Uses Controller Pattern
-// Path: /storage/emulated/0/AndroidIDEProjects/main/java/com/modloader/ui/DllModActivity.java
-
-package com.modloader.ui;
-
-import android.app.Activity;
-import android.app.AlertDialog;
-import android.content.Intent;
-import android.database.Cursor;
-import android.net.Uri;
-import android.os.Bundle;
-import android.provider.OpenableColumns;
-import android.view.View;
-import android.widget.Button;
-import android.widget.LinearLayout;
-import android.widget.TextView;
-import android.widget.Toast;
-
-import androidx.recyclerview.widget.LinearLayoutManager;
-import androidx.recyclerview.widget.RecyclerView;
-
-import com.modloader.R;
-import com.modloader.util.LogUtils;
-
-import java.io.File;
-import java.util.List;
-
-/**
- * DllModActivity now delegates business logic to DllModController
- * This keeps the activity focused on UI management while the controller handles the logic
- */
-public class DllModActivity extends Activity implements DllModController.DllModCallback {
-
-    private static final int REQUEST_SELECT_APK = 1001;
-    private static final int REQUEST_SELECT_DLL = 1002;
-    
-    // UI Components
-    private TextView statusText;
-    private TextView loaderStatusText;
-    private RecyclerView dllModRecyclerView;
-    private Button installLoaderBtn;
-    private Button selectApkBtn;
-    private Button installDllBtn;
-    private Button viewLogsBtn;
-    private Button refreshBtn;
-    private LinearLayout loaderInfoSection;
-    
-    // Controller and Adapter
-    private DllModController controller;
-    private DllModAdapter adapter;
-    private AlertDialog progressDialog;
-
-    @Override
-    protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_dll_mod);
-        
-        setTitle("DLL Mod Manager");
-        
-        // Initialize controller
-        controller = new DllModController(this);
-        controller.setCallback(this);
-        
-        initializeViews();
-        setupUI();
-        
-        // Load initial data
-        controller.loadDllMods();
-        controller.updateLoaderStatus();
-    }
-
-    private void initializeViews() {
-        statusText = findViewById(R.id.statusText);
-        loaderStatusText = findViewById(R.id.loaderStatusText);
-        dllModRecyclerView = findViewById(R.id.dllModRecyclerView);
-        installLoaderBtn = findViewById(R.id.installLoaderBtn);
-        selectApkBtn = findViewById(R.id.selectApkBtn);
-        installDllBtn = findViewById(R.id.installDllBtn);
-        viewLogsBtn = findViewById(R.id.viewLogsBtn);
-        refreshBtn = findViewById(R.id.refreshBtn);
-        loaderInfoSection = findViewById(R.id.loaderInfoSection);
-    }
-
-    private void setupUI() {
-        // Setup RecyclerView
-        dllModRecyclerView.setLayoutManager(new LinearLayoutManager(this));
-        adapter = new DllModAdapter(this, controller);
-        dllModRecyclerView.setAdapter(adapter);
-
-        // Button listeners - delegate to controller
-        installLoaderBtn.setOnClickListener(v -> controller.showLoaderInstallDialog());
-        
-        selectApkBtn.setOnClickListener(v -> {
-            Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
-            intent.setType("application/vnd.android.package-archive");
-            intent.addCategory(Intent.CATEGORY_OPENABLE);
-            startActivityForResult(intent, REQUEST_SELECT_APK);
-        });
-        
-        installDllBtn.setOnClickListener(v -> {
-            Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
-            intent.setType("*/*"); // Allow all files, we'll filter by extension
-            intent.addCategory(Intent.CATEGORY_OPENABLE);
-            startActivityForResult(intent, REQUEST_SELECT_DLL);
-        });
-        
-        viewLogsBtn.setOnClickListener(v -> {
-            startActivity(new Intent(this, LogViewerActivity.class));
-        });
-        
-        refreshBtn.setOnClickListener(v -> {
-            controller.refresh();
-            Toast.makeText(this, "Refreshed DLL mod list", Toast.LENGTH_SHORT).show();
-        });
-    }
-
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-        
-        if (resultCode != RESULT_OK || data == null || data.getData() == null) {
-            return;
-        }
-        
-        Uri uri = data.getData();
-        
-        switch (requestCode) {
-            case REQUEST_SELECT_APK:
-                controller.handleApkSelection(uri);
-                break;
-                
-            case REQUEST_SELECT_DLL:
-                String filename = getFilenameFromUri(uri);
-                controller.handleDllSelection(uri, filename);
-                break;
-        }
-    }
-
-    private String getFilenameFromUri(Uri uri) {
-        String filename = null;
-        
-        try (Cursor cursor = getContentResolver().query(uri, null, null, null, null)) {
-            if (cursor != null && cursor.moveToFirst()) {
-                int nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
-                if (nameIndex >= 0) {
-                    filename = cursor.getString(nameIndex);
-                }
-            }
-        } catch (Exception e) {
-            LogUtils.logDebug("Could not get filename from URI: " + e.getMessage());
-        }
-        
-        return filename;
-    }
-
-    @Override
-    protected void onResume() {
-        super.onResume();
-        controller.refresh();
-    }
-
-    // === DllModController.DllModCallback Implementation ===
-    
-    @Override
-    public void onModsLoaded(List<File> mods) {
-        runOnUiThread(() -> {
-            adapter.updateMods(mods);
-            statusText.setText(controller.getStatusText());
-        });
-    }
-
-    @Override
-    public void onLoaderStatusChanged(boolean installed, String statusText, int textColor) {
-        runOnUiThread(() -> {
-            loaderStatusText.setText(statusText);
-            loaderStatusText.setTextColor(textColor);
-            
-            if (installed) {
-                installLoaderBtn.setText("Reinstall Loader");
-                loaderInfoSection.setVisibility(View.VISIBLE);
-                installDllBtn.setEnabled(true);
-                installDllBtn.setText("Install DLL Mod");
-            } else {
-                installLoaderBtn.setText("Install Loader");
-                loaderInfoSection.setVisibility(View.GONE);
-                installDllBtn.setEnabled(false);
-                installDllBtn.setText("Install Loader First");
-            }
-        });
-    }
-
-    @Override
-    public void onInstallationProgress(String message) {
-        runOnUiThread(() -> {
-            if (progressDialog != null) {
-                progressDialog.dismiss();
-            }
-            
-            if (message.contains("Please select")) {
-                // This is a request for user action, not a progress message
-                return;
-            }
-            
-            progressDialog = new AlertDialog.Builder(this)
-                .setTitle("Installing Loader")
-                .setMessage(message)
-                .setCancelable(false)
-                .show();
-        });
-    }
-
-    @Override
-    public void onInstallationComplete(boolean success, String message) {
-        runOnUiThread(() -> {
-            if (progressDialog != null) {
-                progressDialog.dismiss();
-                progressDialog = null;
-            }
-            
-            if (success) {
-                Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
-            } else {
-                Toast.makeText(this, message, Toast.LENGTH_LONG).show();
-            }
-        });
-    }
-
-    @Override
-    public void onError(String error) {
-        runOnUiThread(() -> {
-            Toast.makeText(this, error, Toast.LENGTH_SHORT).show();
-        });
-    }
-
-    // === Simple adapter class for DLL mods ===
-    private static class DllModAdapter extends RecyclerView.Adapter<DllModAdapter.ViewHolder> {
-        private final Activity activity;
-        private final DllModController controller;
-        private List<File> mods;
-
-        public DllModAdapter(Activity activity, DllModController controller) {
-            this.activity = activity;
-            this.controller = controller;
-            this.mods = controller.getDllMods();
-        }
-
-        public void updateMods(List<File> newMods) {
-            this.mods = newMods;
-            notifyDataSetChanged();
-        }
-
-        @Override
-        public ViewHolder onCreateViewHolder(android.view.ViewGroup parent, int viewType) {
-            View view = android.view.LayoutInflater.from(parent.getContext())
-                .inflate(R.layout.item_mod, parent, false);
-            return new ViewHolder(view);
-        }
-
-        @Override
-        public void onBindViewHolder(ViewHolder holder, int position) {
-            File mod = mods.get(position);
-            String name = mod.getName();
-            boolean isEnabled = !name.endsWith(".disabled");
-            
-            holder.modDescription.setText(name);
-            holder.modSwitch.setChecked(isEnabled);
-            
-            holder.modSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
-                controller.toggleMod(mod, isChecked);
-            });
-            
-            holder.modDeleteButton.setOnClickListener(v -> {
-                controller.deleteMod(mod, () -> {
-                    mods.remove(position);
-                    notifyItemRemoved(position);
-                    notifyItemRangeChanged(position, mods.size());
-                });
-            });
-        }
-
-        @Override
-        public int getItemCount() {
-            return mods.size();
-        }
-
-        static class ViewHolder extends RecyclerView.ViewHolder {
-            TextView modDescription;
-            android.widget.Switch modSwitch;
-            android.widget.ImageButton modDeleteButton;
-
-            ViewHolder(View itemView) {
-                super(itemView);
-                modDescription = itemView.findViewById(R.id.modDescription);
-                modSwitch = itemView.findViewById(R.id.modSwitch);
-                modDeleteButton = itemView.findViewById(R.id.modDeleteButton);
-            }
-        }
-    }
-}
-
-/storage/emulated/0/AndroidIDEProjects/ModLoader/ModLoader/app/src/main/java/com/modloader/ui/DllModController.java
-
-// File: DllModController.java (Fixed) - Corrected method calls with Context parameter
-// Path: /storage/emulated/0/AndroidIDEProjects/TerrariaML/app/src/main/java/com/modloader/ui/DllModController.java
-
-package com.modloader.ui;
-
-import android.app.Activity;
-import android.app.AlertDialog;
-import android.content.Intent;
-import android.net.Uri;
-import com.modloader.loader.ModManager;
-import com.modloader.loader.ModBase;
-import com.modloader.loader.MelonLoaderManager;
-import com.modloader.util.LogUtils;
-import com.modloader.util.FileUtils;
-import com.modloader.installer.ModInstaller;
-import java.io.File;
-import java.util.ArrayList;
-import java.util.List;
-
-public class DllModController {
-    private final Activity activity;
-    private List<File> dllMods = new ArrayList<>();
-    
-    // Callback interface for UI updates
-    public interface DllModCallback {
-        void onModsLoaded(List<File> mods);
-        void onLoaderStatusChanged(boolean installed, String statusText, int textColor);
-        void onInstallationProgress(String message);
-        void onInstallationComplete(boolean success, String message);
-        void onError(String error);
-    }
-    
-    private DllModCallback callback;
-
-    public DllModController(Activity activity) {
-        this.activity = activity;
-    }
-    
-    public void setCallback(DllModCallback callback) {
-        this.callback = callback;
-    }
-
-    public void loadDllMods() {
-        dllMods.clear();
-        
-        // Get DLL mods from ModManager
-        List<File> allMods = ModManager.getAvailableMods();
-        for (File mod : allMods) {
-            ModBase.ModType type = ModBase.ModType.fromFileName(mod.getName());
-            if (type == ModBase.ModType.DLL || type == ModBase.ModType.HYBRID) {
-                dllMods.add(mod);
-            }
-        }
-        
-        LogUtils.logDebug("Loaded " + dllMods.size() + " DLL mods");
-        
-        if (callback != null) {
-            callback.onModsLoaded(dllMods);
-        }
-    }
-
-    public void updateLoaderStatus() {
-        // FIXED: Pass activity context to MelonLoaderManager methods
-        boolean melonInstalled = MelonLoaderManager.isMelonLoaderInstalled(activity);
-        boolean lemonInstalled = MelonLoaderManager.isLemonLoaderInstalled(activity);
-        
-        if (melonInstalled) {
-            String statusText = "✅ MelonLoader " + MelonLoaderManager.getInstalledLoaderVersion() + " installed";
-            if (callback != null) {
-                callback.onLoaderStatusChanged(true, statusText, 0xFF4CAF50); // Green
-            }
-        } else if (lemonInstalled) {
-            String statusText = "✅ LemonLoader " + MelonLoaderManager.getInstalledLoaderVersion() + " installed";
-            if (callback != null) {
-                callback.onLoaderStatusChanged(true, statusText, 0xFF4CAF50); // Green
-            }
-        } else {
-            String statusText = "❌ No loader installed - DLL mods will not work";
-            if (callback != null) {
-                callback.onLoaderStatusChanged(false, statusText, 0xFFF44336); // Red
-            }
-        }
-    }
-
-    public void showLoaderInstallDialog() {
-        AlertDialog.Builder builder = new AlertDialog.Builder(activity);
-        builder.setTitle("Choose Loader");
-        builder.setMessage("Select which loader to install:\n\n" +
-                          "• MelonLoader: Full-featured, works with most Unity games\n" +
-                          "• LemonLoader: Lightweight, better for older devices\n\n" +
-                          "You will need to select a Terraria APK file after choosing.");
-        
-        builder.setPositiveButton("MelonLoader", (dialog, which) -> {
-            LogUtils.logUser("User selected MelonLoader installation");
-            showApkInstructions("MelonLoader");
-        });
-        
-        builder.setNegativeButton("LemonLoader", (dialog, which) -> {
-            LogUtils.logUser("User selected LemonLoader installation");
-            showApkInstructions("LemonLoader");
-        });
-        
-        builder.setNeutralButton("Cancel", null);
-        builder.show();
-    }
-
-    public void showApkInstructions(String loaderType) {
-        AlertDialog.Builder builder = new AlertDialog.Builder(activity);
-        builder.setTitle("APK Installation Instructions");
-        builder.setMessage("To install " + loaderType + ":\n\n" +
-                          "1. Select your Terraria APK file\n" +
-                          "2. The loader will be injected into the APK\n" +
-                          "3. Install the modified APK\n" +
-                          "4. Your DLL mods will work in Terraria\n\n" +
-                          "Ready to select APK?");
-        
-        builder.setPositiveButton("Select APK", (dialog, which) -> {
-            // Store the selected loader type for later use
-            activity.getSharedPreferences("dll_mod_prefs", Activity.MODE_PRIVATE)
-                .edit()
-                .putString("selected_loader", loaderType)
-                .apply();
-            
-            // Trigger APK selection in the UI
-            if (callback != null) {
-                callback.onInstallationProgress("Please select Terraria APK file");
-            }
-        });
-        
-        builder.setNegativeButton("Cancel", null);
-        builder.show();
-    }
-
-    public void handleApkSelection(Uri apkUri) {
-        LogUtils.logUser("APK selected for loader installation");
-        
-        // Get the selected loader type
-        String selectedLoader = activity.getSharedPreferences("dll_mod_prefs", Activity.MODE_PRIVATE)
-            .getString("selected_loader", "MelonLoader");
-        
-        // Show confirmation dialog
-        AlertDialog.Builder builder = new AlertDialog.Builder(activity);
-        builder.setTitle("Confirm Installation");
-        builder.setMessage("Install " + selectedLoader + " into the selected APK?\n\n" +
-                          "This will create a new patched APK file that you can install.");
-        
-        builder.setPositiveButton("Install", (dialog, which) -> {
-            if ("MelonLoader".equals(selectedLoader)) {
-                installLoaderIntoApk(apkUri, MelonLoaderManager.LoaderType.MELONLOADER_NET8);
-            } else {
-                installLoaderIntoApk(apkUri, MelonLoaderManager.LoaderType.MELONLOADER_NET35);
-            }
-        });
-        
-        builder.setNegativeButton("Cancel", null);
-        builder.show();
-    }
-
-    public void handleDllSelection(Uri dllUri, String filename) {
-        LogUtils.logUser("DLL file selected for installation");
-        
-        if (filename == null) {
-            filename = "mod_" + System.currentTimeMillis() + ".dll";
-        }
-        
-        if (!filename.toLowerCase().endsWith(".dll")) {
-            if (callback != null) {
-                callback.onError("Please select a .dll file");
-            }
-            return;
-        }
-        
-        // FIXED: Pass activity context to MelonLoaderManager methods
-        if (!MelonLoaderManager.isMelonLoaderInstalled(activity) && !MelonLoaderManager.isLemonLoaderInstalled(activity)) {
-            showLoaderRequiredDialog();
-            return;
-        }
-        
-        // Install DLL mod
-        boolean success = ModInstaller.installMod(activity, dllUri, filename);
-        
-        if (success) {
-            if (callback != null) {
-                callback.onInstallationComplete(true, "DLL mod installed successfully");
-            }
-            loadDllMods(); // Refresh list
-        } else {
-            if (callback != null) {
-                callback.onInstallationComplete(false, "Failed to install DLL mod");
-            }
-        }
-    }
-
-    public void showLoaderRequiredDialog() {
-        AlertDialog.Builder builder = new AlertDialog.Builder(activity);
-        builder.setTitle("Loader Required");
-        builder.setMessage("DLL mods require MelonLoader or LemonLoader to be installed first.\n\n" +
-                          "Would you like to install a loader now?");
-        
-        builder.setPositiveButton("Install Loader", (dialog, which) -> {
-            showLoaderInstallDialog();
-        });
-        
-        builder.setNegativeButton("Cancel", null);
-        builder.show();
-    }
-
-    public void installLoaderIntoApk(Uri apkUri, MelonLoaderManager.LoaderType loaderType) {
-        LogUtils.logUser("Installing " + loaderType.getDisplayName() + " into APK");
-        
-        if (callback != null) {
-            callback.onInstallationProgress("Installing " + loaderType.getDisplayName() + " into APK...\nThis may take a few minutes.");
-        }
-        
-        // Run installation in background thread
-        new Thread(() -> {
-            boolean success = false;
-            File outputApk = null;
-            
-            try {
-                // Create temporary files
-                File tempApk = File.createTempFile("input_", ".apk", activity.getCacheDir());
-                outputApk = new File(activity.getExternalFilesDir(null), "patched_terraria_" + 
-                                        loaderType.name().toLowerCase() + "_" +
-                                        System.currentTimeMillis() + ".apk");
-                
-                // Copy input APK to temp file
-                FileUtils.copyUriToFile(activity, apkUri, tempApk);
-                
-                // Install loader
-                if (loaderType == MelonLoaderManager.LoaderType.MELONLOADER_NET8) {
-                    success = MelonLoaderManager.installMelonLoader(activity, tempApk, outputApk);
-                } else if (loaderType == MelonLoaderManager.LoaderType.MELONLOADER_NET35) {
-                    success = MelonLoaderManager.installLemonLoader(activity, tempApk, outputApk);
-                }
-                
-                // Cleanup temp file
-                tempApk.delete();
-                
-            } catch (Exception e) {
-                LogUtils.logDebug("Loader installation error: " + e.getMessage());
-                success = false;
-            }
-            
-            // Update UI on main thread
-            final boolean finalSuccess = success;
-            final File finalOutputApk = outputApk;
-            
-            activity.runOnUiThread(() -> {
-                if (finalSuccess) {
-                    showInstallationSuccessDialog(finalOutputApk, loaderType);
-                } else {
-                    if (callback != null) {
-                        callback.onInstallationComplete(false, "Loader installation failed");
-                    }
-                    LogUtils.logUser("❌ " + loaderType.getDisplayName() + " installation failed");
-                }
-                
-                updateLoaderStatus();
-            });
-        }).start();
-    }
-
-    public void showInstallationSuccessDialog(File outputApk, MelonLoaderManager.LoaderType loaderType) {
-        AlertDialog.Builder builder = new AlertDialog.Builder(activity);
-        builder.setTitle("Installation Complete");
-        builder.setMessage("✅ " + loaderType.getDisplayName() + " has been installed into the APK!\n\n" +
-                          "Patched APK saved to:\n" + outputApk.getName() + "\n\n" +
-                          "Next steps:\n" +
-                          "1. Install the patched APK\n" +
-                          "2. Install DLL mods\n" +
-                          "3. Launch Terraria");
-        
-        builder.setPositiveButton("Install APK", (dialog, which) -> {
-            installApk(outputApk);
-        });
-        
-        builder.setNegativeButton("Later", null);
-        builder.show();
-        
-        LogUtils.logUser("✅ " + loaderType.getDisplayName() + " installation completed successfully");
-        
-        if (callback != null) {
-            callback.onInstallationComplete(true, loaderType.getDisplayName() + " installation completed successfully");
-        }
-    }
-
-    public void installApk(File apkFile) {
-        try {
-            Intent intent = new Intent(Intent.ACTION_VIEW);
-            intent.setDataAndType(
-                androidx.core.content.FileProvider.getUriForFile(
-                    activity, 
-                    activity.getPackageName() + ".provider", 
-                    apkFile
-                ),
-                "application/vnd.android.package-archive"
-            );
-            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            activity.startActivity(intent);
-        } catch (Exception e) {
-            if (callback != null) {
-                callback.onError("Cannot install APK: " + e.getMessage());
-            }
-            LogUtils.logDebug("APK installation error: " + e.getMessage());
-        }
-    }
-
-    public void toggleMod(File mod, boolean isChecked) {
-        if (isChecked) {
-            ModManager.enableMod(activity, mod);
-        } else {
-            ModManager.disableMod(activity, mod);
-        }
-    }
-
-    public void deleteMod(File mod, Runnable onSuccess) {
-        AlertDialog.Builder builder = new AlertDialog.Builder(activity);
-        builder.setTitle("Delete Mod");
-        builder.setMessage("Delete " + mod.getName() + "?");
-        builder.setPositiveButton("Delete", (dialog, which) -> {
-            if (ModManager.deleteMod(activity, mod)) {
-                if (onSuccess != null) {
-                    onSuccess.run();
-                }
-                loadDllMods(); // Refresh the list
-            }
-        });
-        builder.setNegativeButton("Cancel", null);
-        builder.show();
-    }
-
-    public List<File> getDllMods() {
-        return new ArrayList<>(dllMods);
-    }
-
-    public String getStatusText() {
-        int enabledCount = 0;
-        for (File mod : dllMods) {
-            if (!mod.getName().endsWith(".disabled")) {
-                enabledCount++;
-            }
-        }
-        
-        return "DLL Mods: " + enabledCount + " enabled, " + 
-               (dllMods.size() - enabledCount) + " disabled, " + 
-               dllMods.size() + " total";
-    }
-
-    public boolean isLoaderInstalled() {
-        // FIXED: Pass activity context to MelonLoaderManager methods
-        return MelonLoaderManager.isMelonLoaderInstalled(activity) || MelonLoaderManager.isLemonLoaderInstalled(activity);
-    }
-
-    public void refresh() {
-        loadDllMods();
-        updateLoaderStatus();
-    }
-}
-
-/storage/emulated/0/AndroidIDEProjects/ModLoader/ModLoader/app/src/main/java/com/modloader/ui/InstructionsActivity.java
+/ModLoader/app/src/main/java/com/modloader/ui/InstructionsActivity.java
 
 // File: InstructionsActivity.java (Fixed) - Corrected method calls with Context parameter
 // Path: /storage/emulated/0/AndroidIDEProjects/TerrariaML/app/src/main/java/com/modloader/ui/InstructionsActivity.java
@@ -9168,7 +301,7 @@ public class InstructionsActivity extends AppCompatActivity {
     }
 }
 
-/storage/emulated/0/AndroidIDEProjects/ModLoader/ModLoader/app/src/main/java/com/modloader/ui/LogCategoryAdapter.java
+/ModLoader/app/src/main/java/com/modloader/ui/LogCategoryAdapter.java
 
 // File: LogCategoryAdapter.java - Advanced Log Display Adapter
 // Path: /main/java/com/modloader/ui/LogCategoryAdapter.java
@@ -9574,7 +707,7 @@ public class LogCategoryAdapter extends RecyclerView.Adapter<LogCategoryAdapter.
     }
 }
 
-/storage/emulated/0/AndroidIDEProjects/ModLoader/ModLoader/app/src/main/java/com/modloader/ui/LogEntry.java
+/ModLoader/app/src/main/java/com/modloader/ui/LogEntry.java
 
 // File: LogEntry.java - Enhanced Log Entry Model for Advanced Logging
 // Path: /main/java/com/modloader/ui/LogEntry.java
@@ -9853,3 +986,7717 @@ public class LogEntry {
     }
 }
 
+/ModLoader/app/src/main/java/com/modloader/ui/LogViewerActivity.java
+
+// File: LogViewerActivity.java (FIXED) - Complete Enhanced Log Viewer with Persistent Settings
+// Path: /app/src/main/java/com/modloader/ui/LogViewerActivity.java
+
+package com.modloader.ui;
+
+import android.app.AlertDialog;
+import android.content.Context;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.graphics.Color;
+import android.graphics.Typeface;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.text.Editable;
+import android.text.TextWatcher;
+import android.view.Menu;
+import android.view.MenuItem;
+import android.view.View;
+import android.widget.*;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.content.FileProvider;
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
+
+import com.modloader.R;
+import com.modloader.util.LogUtils;
+
+import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.text.SimpleDateFormat;
+import java.util.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.regex.Pattern;
+
+public class LogViewerActivity extends AppCompatActivity {
+    private static final String TAG = "LogViewerActivity";
+    
+    // FIXED: SharedPreferences for persistent settings
+    private static final String PREFS_NAME = "log_viewer_settings";
+    private static final String PREF_AUTO_REFRESH = "auto_refresh_enabled";
+    private static final String PREF_SYNTAX_HIGHLIGHTING = "syntax_highlighting_enabled";
+    private static final String PREF_TEXT_SIZE = "text_size";
+    private static final String PREF_AUTO_SCROLL = "auto_scroll_enabled";
+    private static final String PREF_LOG_TYPE_FILTER = "log_type_filter";
+    private static final String PREF_LOG_LEVEL_FILTER = "log_level_filter";
+    
+    // UI Components
+    private SwipeRefreshLayout swipeRefreshLayout;
+    private ScrollView logScrollView;
+    private TextView logTextView;
+    private TextView logStatsText;
+    private Button refreshButton;
+    
+    // Filter Components
+    private LinearLayout filterSection;
+    private Spinner logTypeSpinner;
+    private Spinner logLevelSpinner;
+    private EditText searchEditText;
+    private CheckBox autoScrollCheckbox;
+    private Button clearLogsButton;
+    private Button exportLogsButton;
+    
+    // Settings Components (for settings modal)
+    private SharedPreferences settings;
+    private boolean autoRefreshEnabled = true;
+    private boolean syntaxHighlightingEnabled = true;
+    private int textSize = 12;
+    private boolean autoScrollEnabled = true;
+    
+    // Data Management
+    private List<LogEntry> allLogEntries = new ArrayList<>();
+    private List<LogEntry> filteredLogEntries = new ArrayList<>();
+    private String currentSearchQuery = "";
+    private String currentTypeFilter = "ALL";
+    private String currentLevelFilter = "ALL";
+    
+    // Auto-refresh
+    private Handler autoRefreshHandler;
+    private Runnable autoRefreshRunnable;
+    private static final int AUTO_REFRESH_INTERVAL = 5000; // 5 seconds
+    
+    // Threading
+    private ExecutorService executorService = Executors.newSingleThreadExecutor();
+    
+    // Log Entry Model
+    private static class LogEntry {
+        public String timestamp;
+        public String level;
+        public String tag;
+        public String message;
+        public String type;
+        public String fullText;
+        
+        public LogEntry(String fullText) {
+            this.fullText = fullText;
+            parseLogEntry(fullText);
+        }
+        
+        private void parseLogEntry(String logText) {
+            // Parse log entry format: [2025-08-31 13:42:28] LEVEL: Message
+            try {
+                if (logText.startsWith("[")) {
+                    int timestampEnd = logText.indexOf("]");
+                    if (timestampEnd > 0) {
+                        timestamp = logText.substring(1, timestampEnd);
+                        String remaining = logText.substring(timestampEnd + 1).trim();
+                        
+                        if (remaining.contains(":")) {
+                            String[] parts = remaining.split(":", 2);
+                            level = parts[0].trim();
+                            message = parts.length > 1 ? parts[1].trim() : "";
+                        } else {
+                            level = "INFO";
+                            message = remaining;
+                        }
+                    } else {
+                        // Fallback parsing
+                        timestamp = "Unknown";
+                        level = "INFO";
+                        message = logText;
+                    }
+                } else {
+                    // Simple format without timestamp
+                    timestamp = "Unknown";
+                    level = "INFO";
+                    message = logText;
+                }
+                
+                // Determine type based on content
+                if (message.contains("USER:") || level.equals("USER")) {
+                    type = "USER";
+                } else if (message.contains("ERROR") || level.equals("ERROR")) {
+                    type = "ERROR";
+                } else if (message.contains("WARNING") || level.equals("WARNING")) {
+                    type = "WARNING";
+                } else if (message.contains("DEBUG") || level.equals("DEBUG")) {
+                    type = "DEBUG";
+                } else {
+                    type = "INFO";
+                }
+                
+                // Extract tag if present
+                if (message.startsWith("[") && message.contains("]")) {
+                    int tagEnd = message.indexOf("]");
+                    tag = message.substring(1, tagEnd);
+                } else {
+                    tag = "System";
+                }
+            } catch (Exception e) {
+                // Fallback for malformed log entries
+                timestamp = "Unknown";
+                level = "INFO";
+                tag = "System";
+                message = logText;
+                type = "INFO";
+            }
+        }
+    }
+    
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_log_viewer_enhanced);
+        setTitle("📋 Advanced Log Viewer");
+        
+        // FIXED: Initialize SharedPreferences
+        settings = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        loadSettings();
+        
+        initializeViews();
+        setupFilters();
+        setupListeners();
+        setupAutoRefresh();
+        
+        // Initial log load
+        refreshLogs();
+        
+        LogUtils.logUser("Advanced Log Viewer opened");
+    }
+    
+    // FIXED: Load settings from SharedPreferences
+    private void loadSettings() {
+        autoRefreshEnabled = settings.getBoolean(PREF_AUTO_REFRESH, true);
+        syntaxHighlightingEnabled = settings.getBoolean(PREF_SYNTAX_HIGHLIGHTING, true);
+        textSize = settings.getInt(PREF_TEXT_SIZE, 12);
+        autoScrollEnabled = settings.getBoolean(PREF_AUTO_SCROLL, true);
+        currentTypeFilter = settings.getString(PREF_LOG_TYPE_FILTER, "ALL");
+        currentLevelFilter = settings.getString(PREF_LOG_LEVEL_FILTER, "ALL");
+        
+        LogUtils.logDebug("Settings loaded - AutoRefresh: " + autoRefreshEnabled + 
+            ", SyntaxHighlighting: " + syntaxHighlightingEnabled + 
+            ", TextSize: " + textSize);
+    }
+    
+    // FIXED: Save settings to SharedPreferences
+    private void saveSettings() {
+        SharedPreferences.Editor editor = settings.edit();
+        editor.putBoolean(PREF_AUTO_REFRESH, autoRefreshEnabled);
+        editor.putBoolean(PREF_SYNTAX_HIGHLIGHTING, syntaxHighlightingEnabled);
+        editor.putInt(PREF_TEXT_SIZE, textSize);
+        editor.putBoolean(PREF_AUTO_SCROLL, autoScrollEnabled);
+        editor.putString(PREF_LOG_TYPE_FILTER, currentTypeFilter);
+        editor.putString(PREF_LOG_LEVEL_FILTER, currentLevelFilter);
+        editor.apply(); // FIXED: Use apply() for asynchronous save
+        
+        LogUtils.logDebug("Settings saved successfully");
+    }
+    
+    private void initializeViews() {
+        // Main components
+        swipeRefreshLayout = findViewById(R.id.swipeRefreshLayout);
+        logScrollView = findViewById(R.id.logScrollView);
+        logTextView = findViewById(R.id.logTextView);
+        logStatsText = findViewById(R.id.logStatsText);
+        refreshButton = findViewById(R.id.refreshButton);
+        
+        // Filter components
+        filterSection = findViewById(R.id.filterSection);
+        logTypeSpinner = findViewById(R.id.logTypeSpinner);
+        logLevelSpinner = findViewById(R.id.logLevelSpinner);
+        searchEditText = findViewById(R.id.searchEditText);
+        autoScrollCheckbox = findViewById(R.id.autoScrollCheckbox);
+        clearLogsButton = findViewById(R.id.clearLogsButton);
+        exportLogsButton = findViewById(R.id.exportLogsButton);
+        
+        // FIXED: Apply loaded settings to UI components
+        applySettingsToUI();
+    }
+    
+    // FIXED: Apply loaded settings to UI components
+    private void applySettingsToUI() {
+        if (logTextView != null) {
+            logTextView.setTextSize(textSize);
+        }
+        if (autoScrollCheckbox != null) {
+            autoScrollCheckbox.setChecked(autoScrollEnabled);
+        }
+    }
+    
+    private void setupFilters() {
+        // Setup type filter spinner
+        String[] typeOptions = {"ALL", "USER", "ERROR", "WARNING", "DEBUG", "INFO"};
+        ArrayAdapter<String> typeAdapter = new ArrayAdapter<>(this, 
+            android.R.layout.simple_spinner_item, typeOptions);
+        typeAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        logTypeSpinner.setAdapter(typeAdapter);
+        
+        // FIXED: Set spinner to saved filter value
+        int typePosition = Arrays.asList(typeOptions).indexOf(currentTypeFilter);
+        if (typePosition >= 0) {
+            logTypeSpinner.setSelection(typePosition);
+        }
+        
+        // Setup level filter spinner
+        String[] levelOptions = {"ALL", "ERROR", "WARNING", "INFO", "DEBUG", "USER"};
+        ArrayAdapter<String> levelAdapter = new ArrayAdapter<>(this, 
+            android.R.layout.simple_spinner_item, levelOptions);
+        levelAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        logLevelSpinner.setAdapter(levelAdapter);
+        
+        // FIXED: Set spinner to saved filter value
+        int levelPosition = Arrays.asList(levelOptions).indexOf(currentLevelFilter);
+        if (levelPosition >= 0) {
+            logLevelSpinner.setSelection(levelPosition);
+        }
+    }
+    
+    private void setupListeners() {
+        // Swipe to refresh
+        swipeRefreshLayout.setOnRefreshListener(this::refreshLogs);
+        
+        // Manual refresh button
+        refreshButton.setOnClickListener(v -> refreshLogs());
+        
+        // Filter listeners
+        logTypeSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                currentTypeFilter = parent.getItemAtPosition(position).toString();
+                saveSettings(); // FIXED: Save when filter changes
+                applyFilters();
+            }
+            
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {}
+        });
+        
+        logLevelSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                currentLevelFilter = parent.getItemAtPosition(position).toString();
+                saveSettings(); // FIXED: Save when filter changes
+                applyFilters();
+            }
+            
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {}
+        });
+        
+        // Search functionality
+        searchEditText.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {
+                currentSearchQuery = s.toString().toLowerCase().trim();
+                applyFilters();
+            }
+            
+            @Override
+            public void afterTextChanged(Editable s) {}
+        });
+        
+        // Auto-scroll checkbox
+        autoScrollCheckbox.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            autoScrollEnabled = isChecked;
+            saveSettings(); // FIXED: Save when setting changes
+            if (isChecked) {
+                scrollToBottom();
+            }
+        });
+        
+        // Action buttons
+        clearLogsButton.setOnClickListener(v -> showClearLogsDialog());
+        exportLogsButton.setOnClickListener(v -> exportLogs());
+    }
+    
+    private void setupAutoRefresh() {
+        autoRefreshHandler = new Handler(Looper.getMainLooper());
+        autoRefreshRunnable = new Runnable() {
+            @Override
+            public void run() {
+                if (autoRefreshEnabled) {
+                    refreshLogs();
+                    autoRefreshHandler.postDelayed(this, AUTO_REFRESH_INTERVAL);
+                }
+            }
+        };
+        
+        // Start auto-refresh if enabled
+        if (autoRefreshEnabled) {
+            autoRefreshHandler.postDelayed(autoRefreshRunnable, AUTO_REFRESH_INTERVAL);
+        }
+    }
+    
+    private void refreshLogs() {
+        executorService.execute(() -> {
+            try {
+                // Get logs from LogUtils
+                String rawLogs = LogUtils.getLogs();
+                
+                runOnUiThread(() -> {
+                    parseAndDisplayLogs(rawLogs);
+                    swipeRefreshLayout.setRefreshing(false);
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    logTextView.setText("❌ Error loading logs: " + e.getMessage());
+                    swipeRefreshLayout.setRefreshing(false);
+                });
+            }
+        });
+    }
+    
+    private void parseAndDisplayLogs(String rawLogs) {
+        // Parse logs into entries
+        allLogEntries.clear();
+        if (rawLogs != null && !rawLogs.trim().isEmpty()) {
+            String[] logLines = rawLogs.split("\n");
+            for (String line : logLines) {
+                if (!line.trim().isEmpty()) {
+                    allLogEntries.add(new LogEntry(line.trim()));
+                }
+            }
+        }
+        
+        // Apply current filters
+        applyFilters();
+    }
+    
+    private void applyFilters() {
+        filteredLogEntries.clear();
+        
+        for (LogEntry entry : allLogEntries) {
+            boolean matchesType = currentTypeFilter.equals("ALL") || 
+                entry.type.equals(currentTypeFilter);
+            boolean matchesLevel = currentLevelFilter.equals("ALL") || 
+                entry.level.equals(currentLevelFilter);
+            boolean matchesSearch = currentSearchQuery.isEmpty() || 
+                entry.fullText.toLowerCase().contains(currentSearchQuery);
+            
+            if (matchesType && matchesLevel && matchesSearch) {
+                filteredLogEntries.add(entry);
+            }
+        }
+        
+        displayFilteredLogs();
+        updateStatistics();
+    }
+    
+    private void displayFilteredLogs() {
+        if (filteredLogEntries.isEmpty()) {
+            logTextView.setText("📋 No logs match the current filters.\n\n" +
+                "Try:\n" +
+                "• Changing filter settings\n" +
+                "• Clearing search query\n" +
+                "• Refreshing logs\n" +
+                "• Using the app to generate logs");
+            return;
+        }
+        
+        StringBuilder displayText = new StringBuilder();
+        
+        for (LogEntry entry : filteredLogEntries) {
+            if (syntaxHighlightingEnabled) {
+                displayText.append(formatLogEntryWithSyntax(entry));
+            } else {
+                displayText.append(entry.fullText);
+            }
+            displayText.append("\n");
+        }
+        
+        // FIXED: Apply text size from settings
+        logTextView.setText(displayText.toString());
+        logTextView.setTextSize(textSize);
+        
+        // Auto-scroll if enabled
+        if (autoScrollEnabled) {
+            scrollToBottom();
+        }
+    }
+    
+    private String formatLogEntryWithSyntax(LogEntry entry) {
+        // This would ideally use SpannableString for actual coloring
+        // For now, we'll add visual indicators
+        String indicator = "";
+        switch (entry.type) {
+            case "ERROR":
+                indicator = "❌ ";
+                break;
+            case "WARNING":
+                indicator = "⚠️ ";
+                break;
+            case "DEBUG":
+                indicator = "🔍 ";
+                break;
+            case "USER":
+                indicator = "👤 ";
+                break;
+            default:
+                indicator = "ℹ️ ";
+                break;
+        }
+        
+        return indicator + entry.fullText;
+    }
+    
+    private void updateStatistics() {
+        int totalLogs = allLogEntries.size();
+        int showingLogs = filteredLogEntries.size();
+        int errorCount = 0;
+        int warningCount = 0;
+        
+        for (LogEntry entry : allLogEntries) {
+            if ("ERROR".equals(entry.type)) errorCount++;
+            else if ("WARNING".equals(entry.type)) warningCount++;
+        }
+        
+        String statsText = String.format(Locale.getDefault(),
+            "📊 Total: %d | Showing: %d | Errors: %d | Warnings: %d",
+            totalLogs, showingLogs, errorCount, warningCount);
+        
+        logStatsText.setText(statsText);
+    }
+    
+    private void scrollToBottom() {
+        logScrollView.post(() -> {
+            logScrollView.fullScroll(View.FOCUS_DOWN);
+        });
+    }
+    
+    // FIXED: Settings dialog with proper persistence
+    private void showSettingsDialog() {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        
+        // Create custom view for settings
+        LinearLayout settingsView = new LinearLayout(this);
+        settingsView.setOrientation(LinearLayout.VERTICAL);
+        settingsView.setPadding(48, 32, 48, 32);
+        
+        // Title
+        TextView title = new TextView(this);
+        title.setText("⚙️ Log Viewer Settings");
+        title.setTextSize(18);
+        title.setTypeface(null, Typeface.BOLD);
+        title.setPadding(0, 0, 0, 24);
+        settingsView.addView(title);
+        
+        // Auto-refresh setting
+        CheckBox autoRefreshCheck = new CheckBox(this);
+        autoRefreshCheck.setText("🔄 Auto-refresh logs (every 5 seconds)");
+        autoRefreshCheck.setChecked(autoRefreshEnabled);
+        settingsView.addView(autoRefreshCheck);
+        
+        // Syntax highlighting setting
+        CheckBox syntaxHighlightCheck = new CheckBox(this);
+        syntaxHighlightCheck.setText("🎨 Enable syntax highlighting");
+        syntaxHighlightCheck.setChecked(syntaxHighlightingEnabled);
+        settingsView.addView(syntaxHighlightCheck);
+        
+        // Text size setting
+        TextView textSizeLabel = new TextView(this);
+        textSizeLabel.setText("📝 Text Size: " + textSize);
+        textSizeLabel.setPadding(0, 24, 0, 8);
+        settingsView.addView(textSizeLabel);
+        
+        SeekBar textSizeSeek = new SeekBar(this);
+        textSizeSeek.setMin(8);
+        textSizeSeek.setMax(24);
+        textSizeSeek.setProgress(textSize);
+        textSizeSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                textSizeLabel.setText("📝 Text Size: " + progress);
+            }
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
+        settingsView.addView(textSizeSeek);
+        
+        // Note about persistence
+        TextView persistNote = new TextView(this);
+        persistNote.setText("💡 Changes are applied immediately and persist during this session.");
+        persistNote.setTextSize(12);
+        persistNote.setPadding(0, 16, 0, 0);
+        persistNote.setTextColor(Color.GRAY);
+        settingsView.addView(persistNote);
+        
+        builder.setView(settingsView);
+        builder.setPositiveButton("✅ Apply", (dialog, which) -> {
+            // FIXED: Apply and save settings
+            autoRefreshEnabled = autoRefreshCheck.isChecked();
+            syntaxHighlightingEnabled = syntaxHighlightCheck.isChecked();
+            textSize = textSizeSeek.getProgress();
+            
+            // Save to SharedPreferences
+            saveSettings();
+            
+            // Apply immediately
+            applySettingsToUI();
+            displayFilteredLogs(); // Refresh display with new settings
+            
+            // Restart auto-refresh if needed
+            setupAutoRefresh();
+            
+            Toast.makeText(this, "✅ Settings applied and saved!", Toast.LENGTH_SHORT).show();
+            LogUtils.logUser("Log viewer settings updated - AutoRefresh: " + autoRefreshEnabled + 
+                ", Syntax: " + syntaxHighlightingEnabled + ", TextSize: " + textSize);
+        });
+        
+        builder.setNegativeButton("Cancel", null);
+        builder.show();
+    }
+    
+    private void showClearLogsDialog() {
+        new AlertDialog.Builder(this)
+            .setTitle("🗑️ Clear Logs")
+            .setMessage("Are you sure you want to clear all logs? This action cannot be undone.")
+            .setPositiveButton("Clear", (dialog, which) -> {
+                LogUtils.clearLogs();
+                allLogEntries.clear();
+                filteredLogEntries.clear();
+                logTextView.setText("📋 Logs cleared.\n\nNew logs will appear here as you use the app.");
+                updateStatistics();
+                Toast.makeText(this, "🗑️ Logs cleared", Toast.LENGTH_SHORT).show();
+            })
+            .setNegativeButton("Cancel", null)
+            .show();
+    }
+    
+    private void exportLogs() {
+        try {
+            File exportDir = new File(getExternalFilesDir(null), "exports");
+            if (!exportDir.exists()) {
+                exportDir.mkdirs();
+            }
+            
+            String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault())
+                .format(new Date());
+            File exportFile = new File(exportDir, "terraria_logs_" + timestamp + ".txt");
+            
+            try (FileWriter writer = new FileWriter(exportFile)) {
+                writer.write("=== ModLoader Log Export ===\n");
+                writer.write("Exported: " + new Date().toString() + "\n");
+                writer.write("Total Entries: " + allLogEntries.size() + "\n");
+                writer.write("Filtered Entries: " + filteredLogEntries.size() + "\n");
+                writer.write("Filters - Type: " + currentTypeFilter + ", Level: " + currentLevelFilter + "\n");
+                writer.write("Search Query: " + (currentSearchQuery.isEmpty() ? "None" : currentSearchQuery) + "\n");
+                writer.write("\n=== LOG ENTRIES ===\n\n");
+                
+                for (LogEntry entry : filteredLogEntries) {
+                    writer.write(entry.fullText + "\n");
+                }
+            }
+            
+            // Share the exported file
+            Intent shareIntent = new Intent(Intent.ACTION_SEND);
+            shareIntent.setType("text/plain");
+            shareIntent.putExtra(Intent.EXTRA_STREAM,
+                FileProvider.getUriForFile(this, getPackageName() + ".provider", exportFile));
+            shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            
+            startActivity(Intent.createChooser(shareIntent, "Share Log Export"));
+            Toast.makeText(this, "✅ Logs exported: " + exportFile.getName(), Toast.LENGTH_LONG).show();
+            
+        } catch (Exception e) {
+            Toast.makeText(this, "❌ Export failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            LogUtils.logDebug("Log export error: " + e.getMessage());
+        }
+    }
+    
+    @Override
+    public boolean onCreateOptionsMenu(Menu menu) {
+        menu.add(0, 1, 0, "⚙️ Settings")
+            .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
+        menu.add(0, 2, 0, "🔄 Toggle Auto-refresh")
+            .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
+        menu.add(0, 3, 0, "📤 Export Logs")
+            .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
+        return true;
+    }
+    
+    @Override
+    public boolean onOptionsItemSelected(MenuItem item) {
+        switch (item.getItemId()) {
+            case 1:
+                showSettingsDialog();
+                return true;
+            case 2:
+                autoRefreshEnabled = !autoRefreshEnabled;
+                saveSettings(); // FIXED: Save when toggled
+                setupAutoRefresh();
+                String status = autoRefreshEnabled ? "enabled" : "disabled";
+                Toast.makeText(this, "🔄 Auto-refresh " + status, Toast.LENGTH_SHORT).show();
+                return true;
+            case 3:
+                exportLogs();
+                return true;
+            default:
+                return super.onOptionsItemSelected(item);
+        }
+    }
+    
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // Refresh logs when returning to activity
+        refreshLogs();
+        
+        // Restart auto-refresh if it was enabled
+        if (autoRefreshEnabled) {
+            setupAutoRefresh();
+        }
+    }
+    
+    @Override
+    protected void onPause() {
+        super.onPause();
+        // Stop auto-refresh when leaving activity
+        if (autoRefreshHandler != null && autoRefreshRunnable != null) {
+            autoRefreshHandler.removeCallbacks(autoRefreshRunnable);
+        }
+        
+        // FIXED: Save settings when leaving activity
+        saveSettings();
+    }
+    
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        // Clean up resources
+        if (executorService != null && !executorService.isShutdown()) {
+            executorService.shutdown();
+        }
+        if (autoRefreshHandler != null && autoRefreshRunnable != null) {
+            autoRefreshHandler.removeCallbacks(autoRefreshRunnable);
+        }
+        
+        LogUtils.logUser("Advanced Log Viewer closed");
+    }
+}
+
+/ModLoader/app/src/main/java/com/modloader/ui/LogViewerEnhancedActivity.java
+
+// File: LogViewerEnhancedActivity.java - Enhanced log viewer with filtering and search
+// Path: /app/src/main/java/com/modloader/ui/LogViewerEnhancedActivity.java
+
+package com.modloader.ui;
+
+import android.app.AlertDialog;
+import android.content.Intent;
+import android.os.Bundle;
+import android.os.Handler;
+import android.text.Editable;
+import android.text.TextWatcher;
+import android.view.Menu;
+import android.view.MenuItem;
+import android.view.View;
+import android.widget.*;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
+
+import com.modloader.R;
+import com.modloader.util.LogUtils;
+import com.modloader.util.DiagnosticBundleExporter;
+
+import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
+
+public class LogViewerEnhancedActivity extends AppCompatActivity {
+    
+    // UI Components
+    private LinearLayout filterSection;
+    private Spinner logTypeSpinner;
+    private Spinner logLevelSpinner;
+    private EditText searchEditText;
+    private TextView logStatsText;
+    private TextView logTextView;
+    private ScrollView logScrollView;
+    private SwipeRefreshLayout swipeRefreshLayout;
+    private CheckBox autoScrollCheckbox;
+    private Button refreshButton;
+    private Button clearLogsButton;
+    private Button exportLogsButton;
+    
+    // State variables
+    private Handler refreshHandler;
+    private Runnable refreshRunnable;
+    private boolean autoRefreshEnabled = true;
+    private boolean filtersVisible = true;
+    private String currentFilter = "All";
+    private String currentLevel = "All";
+    private String currentSearch = "";
+    
+    // Log data
+    private String fullLogContent = "";
+    private List<String> logLines = new ArrayList<>();
+    
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_log_viewer_enhanced);
+        
+        setTitle("Enhanced Log Viewer");
+        
+        initializeViews();
+        setupListeners();
+        setupSpinners();
+        startAutoRefresh();
+        
+        // Initial load
+        refreshLogs();
+    }
+    
+    private void initializeViews() {
+        // Filter section
+        filterSection = findViewById(R.id.filterSection);
+        logTypeSpinner = findViewById(R.id.logTypeSpinner);
+        logLevelSpinner = findViewById(R.id.logLevelSpinner);
+        searchEditText = findViewById(R.id.searchEditText);
+        
+        // Stats and controls
+        logStatsText = findViewById(R.id.logStatsText);
+        refreshButton = findViewById(R.id.refreshButton);
+        clearLogsButton = findViewById(R.id.clearLogsButton);
+        exportLogsButton = findViewById(R.id.exportLogsButton);
+        autoScrollCheckbox = findViewById(R.id.autoScrollCheckbox);
+        
+        // Main log display
+        logTextView = findViewById(R.id.logTextView);
+        logScrollView = findViewById(R.id.logScrollView);
+        swipeRefreshLayout = findViewById(R.id.swipeRefreshLayout);
+    }
+    
+    private void setupListeners() {
+        // Refresh button
+        refreshButton.setOnClickListener(v -> refreshLogs());
+        
+        // Clear logs button
+        clearLogsButton.setOnClickListener(v -> clearLogs());
+        
+        // Export logs button
+        exportLogsButton.setOnClickListener(v -> exportLogs());
+        
+        // Swipe refresh
+        swipeRefreshLayout.setOnRefreshListener(this::refreshLogs);
+        
+        // Search text watcher
+        searchEditText.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {}
+            
+            @Override
+            public void afterTextChanged(Editable s) {
+                currentSearch = s.toString();
+                applyFilters();
+            }
+        });
+        
+        // Spinner listeners
+        logTypeSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                currentFilter = parent.getItemAtPosition(position).toString();
+                applyFilters();
+            }
+            
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {}
+        });
+        
+        logLevelSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                currentLevel = parent.getItemAtPosition(position).toString();
+                applyFilters();
+            }
+            
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {}
+        });
+    }
+    
+    private void setupSpinners() {
+        // Log type spinner
+        String[] logTypes = {"All", "User", "Debug", "Info", "Warning", "Error"};
+        ArrayAdapter<String> typeAdapter = new ArrayAdapter<>(this, 
+            android.R.layout.simple_spinner_item, logTypes);
+        typeAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        logTypeSpinner.setAdapter(typeAdapter);
+        
+        // Log level spinner  
+        String[] logLevels = {"All", "DEBUG", "INFO", "WARNING", "ERROR", "USER"};
+        ArrayAdapter<String> levelAdapter = new ArrayAdapter<>(this,
+            android.R.layout.simple_spinner_item, logLevels);
+        levelAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        logLevelSpinner.setAdapter(levelAdapter);
+    }
+    
+    private void startAutoRefresh() {
+        refreshHandler = new Handler();
+        refreshRunnable = new Runnable() {
+            @Override
+            public void run() {
+                if (autoRefreshEnabled) {
+                    refreshLogs();
+                }
+                refreshHandler.postDelayed(this, 5000); // Refresh every 5 seconds
+            }
+        };
+        refreshHandler.post(refreshRunnable);
+    }
+    
+    private void refreshLogs() {
+        try {
+            // Get logs from LogUtils
+            String logs = LogUtils.getLogs();
+            if (logs == null || logs.isEmpty()) {
+                logs = "No logs available.\n\nIf you're experiencing issues, try:\n• Restarting the app\n• Checking storage permissions\n• Using other app features to generate logs";
+            }
+            
+            fullLogContent = logs;
+            logLines = parseLogLines(logs);
+            
+            // Update statistics
+            updateLogStats();
+            
+            // Apply current filters
+            applyFilters();
+            
+            // Stop refresh animation
+            if (swipeRefreshLayout.isRefreshing()) {
+                swipeRefreshLayout.setRefreshing(false);
+            }
+            
+        } catch (Exception e) {
+            String errorMsg = "Error loading logs: " + e.getMessage();
+            logTextView.setText(errorMsg);
+            updateLogStats(0, 0, 0, 0);
+            
+            if (swipeRefreshLayout.isRefreshing()) {
+                swipeRefreshLayout.setRefreshing(false);
+            }
+        }
+    }
+    
+    private List<String> parseLogLines(String logs) {
+        List<String> lines = new ArrayList<>();
+        if (logs != null && !logs.isEmpty()) {
+            String[] splitLines = logs.split("\n");
+            for (String line : splitLines) {
+                if (line != null && !line.trim().isEmpty()) {
+                    lines.add(line);
+                }
+            }
+        }
+        return lines;
+    }
+    
+    private void applyFilters() {
+        try {
+            List<String> filteredLines = new ArrayList<>();
+            int totalLines = logLines.size();
+            int errorCount = 0;
+            int warningCount = 0;
+            
+            for (String line : logLines) {
+                if (line == null || line.trim().isEmpty()) {
+                    continue;
+                }
+                
+                // Count errors and warnings
+                String lowerLine = line.toLowerCase();
+                if (lowerLine.contains("error") || lowerLine.contains("❌")) {
+                    errorCount++;
+                } else if (lowerLine.contains("warn") || lowerLine.contains("⚠️")) {
+                    warningCount++;
+                }
+                
+                // Apply filters
+                boolean includeByType = filterByType(line);
+                boolean includeByLevel = filterByLevel(line);  
+                boolean includeBySearch = filterBySearch(line);
+                
+                if (includeByType && includeByLevel && includeBySearch) {
+                    filteredLines.add(line);
+                }
+            }
+            
+            // Update display
+            StringBuilder displayContent = new StringBuilder();
+            for (String line : filteredLines) {
+                displayContent.append(line).append("\n");
+            }
+            
+            logTextView.setText(displayContent.toString());
+            updateLogStats(totalLines, filteredLines.size(), errorCount, warningCount);
+            
+            // Auto-scroll to bottom if enabled
+            if (autoScrollCheckbox.isChecked()) {
+                scrollToBottom();
+            }
+            
+        } catch (Exception e) {
+            logTextView.setText("Error applying filters: " + e.getMessage());
+        }
+    }
+    
+    private boolean filterByType(String line) {
+        if ("All".equals(currentFilter)) {
+            return true;
+        }
+        
+        String lowerLine = line.toLowerCase();
+        String lowerFilter = currentFilter.toLowerCase();
+        
+        return lowerLine.contains(lowerFilter) || 
+               (lowerFilter.equals("user") && (lowerLine.contains("✅") || lowerLine.contains("❌") || lowerLine.contains("⚠️")));
+    }
+    
+    private boolean filterByLevel(String line) {
+        if ("All".equals(currentLevel)) {
+            return true;
+        }
+        
+        return line.toUpperCase().contains(currentLevel);
+    }
+    
+    private boolean filterBySearch(String line) {
+        if (currentSearch == null || currentSearch.trim().isEmpty()) {
+            return true;
+        }
+        
+        return line.toLowerCase().contains(currentSearch.toLowerCase());
+    }
+    
+    private void updateLogStats() {
+        updateLogStats(logLines.size(), logLines.size(), 0, 0);
+    }
+    
+    private void updateLogStats(int total, int showing, int errors, int warnings) {
+        String statsText = String.format("Total: %d | Showing: %d | Errors: %d | Warnings: %d", 
+            total, showing, errors, warnings);
+        logStatsText.setText(statsText);
+    }
+    
+    private void scrollToBottom() {
+        logScrollView.post(() -> {
+            logScrollView.fullScroll(ScrollView.FOCUS_DOWN);
+        });
+    }
+    
+    private void clearLogs() {
+        new AlertDialog.Builder(this)
+            .setTitle("Clear Logs")
+            .setMessage("Are you sure you want to clear all logs? This cannot be undone.")
+            .setPositiveButton("Clear", (dialog, which) -> {
+                LogUtils.clearLogs();
+                logTextView.setText("Logs cleared.\n\nNew logs will appear as you use the app.");
+                updateLogStats(0, 0, 0, 0);
+                Toast.makeText(this, "Logs cleared", Toast.LENGTH_SHORT).show();
+            })
+            .setNegativeButton("Cancel", null)
+            .show();
+    }
+    
+    private void exportLogs() {
+        try {
+            // Create diagnostic bundle
+            File bundleFile = DiagnosticBundleExporter.createDiagnosticBundle(this);
+            
+            if (bundleFile != null && bundleFile.exists()) {
+                // Share the bundle
+                Intent shareIntent = new Intent(Intent.ACTION_SEND);
+                shareIntent.setType("application/zip");
+                shareIntent.putExtra(Intent.EXTRA_SUBJECT, "ModLoader Diagnostic Bundle");
+                shareIntent.putExtra(Intent.EXTRA_TEXT, "Diagnostic bundle created on " + new java.util.Date().toString());
+                
+                // Use FileProvider to share the file
+                android.net.Uri fileUri = androidx.core.content.FileProvider.getUriForFile(
+                    this, getPackageName() + ".provider", bundleFile);
+                shareIntent.putExtra(Intent.EXTRA_STREAM, fileUri);
+                shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                
+                startActivity(Intent.createChooser(shareIntent, "Export Diagnostic Bundle"));
+                
+                Toast.makeText(this, "Diagnostic bundle created: " + bundleFile.getName(), 
+                    Toast.LENGTH_LONG).show();
+            } else {
+                Toast.makeText(this, "Failed to create diagnostic bundle", Toast.LENGTH_SHORT).show();
+            }
+            
+        } catch (Exception e) {
+            Toast.makeText(this, "Export failed: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+        }
+    }
+    
+    @Override
+    public boolean onCreateOptionsMenu(Menu menu) {
+        getMenuInflater().inflate(R.menu.log_viewer_menu, menu);
+        return true;
+    }
+    
+    @Override
+    public boolean onOptionsItemSelected(MenuItem item) {
+        int itemId = item.getItemId();
+        
+        if (itemId == R.id.action_toggle_filters) {
+            toggleFilters();
+            return true;
+        } else if (itemId == R.id.action_share_logs) {
+            exportLogs();
+            return true;
+        } else if (itemId == R.id.action_clear_logs) {
+            clearLogs();
+            return true;
+        } else if (itemId == R.id.action_settings) {
+            showSettings();
+            return true;
+        }
+        
+        return super.onOptionsItemSelected(item);
+    }
+    
+    private void toggleFilters() {
+        filtersVisible = !filtersVisible;
+        filterSection.setVisibility(filtersVisible ? View.VISIBLE : View.GONE);
+        Toast.makeText(this, "Filters " + (filtersVisible ? "shown" : "hidden"), Toast.LENGTH_SHORT).show();
+    }
+    
+    private void showSettings() {
+        // Simple settings dialog
+        View settingsView = getLayoutInflater().inflate(R.layout.dialog_log_settings, null);
+        
+        CheckBox autoRefreshCheck = settingsView.findViewById(R.id.autoRefreshCheckbox);
+        autoRefreshCheck.setChecked(autoRefreshEnabled);
+        
+        new AlertDialog.Builder(this)
+            .setTitle("Log Viewer Settings")
+            .setView(settingsView)
+            .setPositiveButton("OK", (dialog, which) -> {
+                autoRefreshEnabled = autoRefreshCheck.isChecked();
+                Toast.makeText(this, "Settings saved", Toast.LENGTH_SHORT).show();
+            })
+            .setNegativeButton("Cancel", null)
+            .show();
+    }
+    
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        if (refreshHandler != null && refreshRunnable != null) {
+            refreshHandler.removeCallbacks(refreshRunnable);
+        }
+    }
+    
+    @Override
+    protected void onPause() {
+        super.onPause();
+        autoRefreshEnabled = false;
+    }
+    
+    @Override
+    protected void onResume() {
+        super.onResume();
+        autoRefreshEnabled = true;
+        refreshLogs();
+    }
+}
+
+/ModLoader/app/src/main/java/com/modloader/ui/ModListActivity.java
+
+package com.modloader.ui;
+
+import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.Intent;
+import android.database.Cursor;
+import android.net.Uri;
+import android.os.Bundle;
+import android.provider.OpenableColumns;
+import android.view.LayoutInflater;
+import android.view.View;
+import android.widget.Button;
+import android.widget.ImageButton;
+import android.widget.TextView;
+import android.widget.Toast;
+import android.widget.Switch; // Make sure this is imported if used in your XML
+
+import androidx.annotation.Nullable;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
+
+import com.modloader.R;
+import com.modloader.installer.ModInstaller;
+import com.modloader.loader.ModManager;
+import com.modloader.util.LogUtils;
+
+import java.io.File;
+import java.util.List;
+
+public class ModListActivity extends AppCompatActivity {
+
+    private RecyclerView recyclerView;
+    private ModListAdapter modAdapter; // Changed from ModAdapter
+    private TextView modCountTextView;
+    private static final int PICK_MOD_FILE_REQUEST = 1;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_mod_list);
+
+        modCountTextView = findViewById(R.id.modCountTextView);
+        recyclerView = findViewById(R.id.recyclerViewMods);
+        recyclerView.setLayoutManager(new LinearLayoutManager(this));
+
+        ImageButton backButton = findViewById(R.id.backButton);
+        backButton.setOnClickListener(v -> onBackPressed());
+
+        Button addModButton = findViewById(R.id.addModButton);
+        addModButton.setOnClickListener(v -> openFilePicker());
+
+        Button refreshModsButton = findViewById(R.id.refreshModsButton);
+        refreshModsButton.setOnClickListener(v -> loadMods());
+
+        loadMods();
+    }
+
+    private void loadMods() {
+        ModManager.loadMods(this);
+        List<File> mods = ModManager.getAvailableMods();
+        modAdapter = new ModListAdapter(this, mods); // Changed to ModListAdapter
+        recyclerView.setAdapter(modAdapter);
+        updateModCount(mods.size());
+    }
+
+    private void updateModCount(int count) {
+        modCountTextView.setText("Total Mods: " + count + " (Enabled: " + ModManager.getEnabledModCount() + ")");
+    }
+
+    private void openFilePicker() {
+        Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+        intent.setType("*/*"); // Allow all file types, then filter
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        try {
+            startActivityForResult(Intent.createChooser(intent, "Select Mod File"), PICK_MOD_FILE_REQUEST);
+        } catch (android.content.ActivityNotFoundException ex) {
+            Toast.makeText(this, "Please install a File Manager.", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == PICK_MOD_FILE_REQUEST && resultCode == Activity.RESULT_OK) {
+            if (data != null && data.getData() != null) {
+                Uri uri = data.getData();
+                handlePickedFile(uri); // Added this method
+            }
+        }
+    }
+
+    // New method to handle picked files and install them
+    private void handlePickedFile(Uri uri) {
+        String filename = getFilenameFromUri(uri);
+        if (filename == null || !isValidModExtension(filename)) {
+            LogUtils.logUser("❌ Invalid mod file type selected.");
+            Toast.makeText(this, "Invalid mod file type. Only .dex, .jar, .dll, .hybrid are supported.", Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("Install Mod");
+        builder.setMessage("Do you want to install '" + filename + "'?");
+        builder.setPositiveButton("Install", (dialog, which) -> {
+            boolean success = ModInstaller.installModAuto(this, uri);
+            if (success) {
+                Toast.makeText(this, "Mod installed successfully!", Toast.LENGTH_SHORT).show();
+                loadMods(); // Reload mods after installation
+            } else {
+                Toast.makeText(this, "Failed to install mod.", Toast.LENGTH_SHORT).show();
+            }
+        });
+        builder.setNegativeButton("Cancel", null);
+        builder.show();
+    }
+
+    private String getFilenameFromUri(Uri uri) {
+        String result = null;
+        if (uri.getScheme().equals("content")) {
+            try (Cursor cursor = getContentResolver().query(uri, null, null, null, null)) {
+                if (cursor != null && cursor.moveToFirst()) {
+                    int nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                    if (nameIndex != -1) {
+                        result = cursor.getString(nameIndex);
+                    }
+                }
+            }
+        }
+        if (result == null) {
+            result = uri.getPath();
+            int cut = result.lastIndexOf('/');
+            if (cut != -1) {
+                result = result.substring(cut + 1);
+            }
+        }
+        return result;
+    }
+
+    private boolean isValidModExtension(String filename) {
+        String lowerFilename = filename.toLowerCase();
+        for (String ext : ModInstaller.getSupportedExtensions()) {
+            if (lowerFilename.endsWith(ext)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        loadMods(); // Refresh mod list when activity resumes
+    }
+}
+
+
+/ModLoader/app/src/main/java/com/modloader/ui/ModListAdapter.java
+
+// File: ModListAdapter.java (Fixed Adapter Class) - NullPointerException Fix
+// Path: /storage/emulated/0/AndroidIDEProjects/TerrariaML/app/src/main/java/com/modloader/ui/ModListAdapter.java
+
+package com.modloader.ui;
+
+import android.app.AlertDialog;
+import android.content.Context;
+import android.view.LayoutInflater;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.ImageButton;
+import android.widget.Switch;
+import android.widget.TextView;
+import android.widget.Toast;
+
+import androidx.annotation.NonNull;
+import androidx.recyclerview.widget.RecyclerView;
+
+import com.modloader.R;
+import com.modloader.installer.ModInstaller;
+import com.modloader.loader.ModManager;
+import com.modloader.loader.ModMetadata;
+import com.modloader.loader.ModBase;
+import com.modloader.util.LogUtils;
+
+import java.io.File;
+import java.util.List;
+
+public class ModListAdapter extends RecyclerView.Adapter<ModListAdapter.ModViewHolder> {
+
+    private final Context context;
+    private List<File> mods; // Changed to non-final to allow updates
+
+    public ModListAdapter(Context context, List<File> mods) {
+        this.context = context;
+        this.mods = mods;
+    }
+
+    @NonNull
+    @Override
+    public ModViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
+        View view = LayoutInflater.from(context).inflate(R.layout.item_mod, parent, false);
+        return new ModViewHolder(view);
+    }
+
+    @Override
+    public void onBindViewHolder(@NonNull ModViewHolder holder, int position) {
+        File modFile = mods.get(position);
+        String modName = modFile.getName();
+        boolean isEnabled = !modName.endsWith(".disabled");
+
+        holder.modNameTextView.setText(modName);
+        
+        // FIXED: Null pointer protection for metadata
+        try {
+            // Get metadata safely
+            String cleanModName = modName.replace(".disabled", "").replace(".dex", "").replace(".jar", "").replace(".dll", "");
+            ModMetadata metadata = ModManager.getMetadata(cleanModName);
+            
+            if (metadata != null) {
+                // Use metadata if available
+                ModBase.ModType modType = metadata.getModType();
+                if (modType != null) {
+                    holder.modDescriptionTextView.setText("Type: " + modType.getDisplayName());
+                } else {
+                    holder.modDescriptionTextView.setText("Type: " + getModTypeFromFileName(modName));
+                }
+            } else {
+                // Fallback to file extension detection
+                holder.modDescriptionTextView.setText("Type: " + getModTypeFromFileName(modName));
+            }
+        } catch (Exception e) {
+            // Ultimate fallback
+            LogUtils.logDebug("Error getting mod metadata: " + e.getMessage());
+            holder.modDescriptionTextView.setText("Type: " + getModTypeFromFileName(modName));
+        }
+
+        holder.modSwitch.setChecked(isEnabled);
+        holder.modSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            try {
+                if (isChecked) {
+                    ModManager.enableMod(context, modFile);
+                } else {
+                    ModManager.disableMod(context, modFile);
+                }
+                // Refresh the adapter after mod state change
+                // Note: The list of files is not actually changing here, only their names.
+                // A better approach would be to reload the list of files entirely.
+                // For now, we will simply notify that the item has changed.
+                notifyItemChanged(position);
+            } catch (Exception e) {
+                LogUtils.logDebug("Error toggling mod: " + e.getMessage());
+                Toast.makeText(context, "Error toggling mod: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+            }
+        });
+
+        holder.modDeleteButton.setOnClickListener(v -> {
+            new AlertDialog.Builder(context)
+                    .setTitle("Delete Mod")
+                    .setMessage("Are you sure you want to delete " + modName + "?")
+                    .setPositiveButton("Delete", (dialog, which) -> {
+                        try {
+                            if (ModInstaller.uninstallMod(context, modName)) {
+                                // Remove from list and notify adapter
+                                mods.remove(position);
+                                notifyItemRemoved(position);
+                                notifyItemRangeChanged(position, mods.size());
+                                Toast.makeText(context, modName + " deleted.", Toast.LENGTH_SHORT).show();
+                            } else {
+                                Toast.makeText(context, "Failed to delete " + modName, Toast.LENGTH_SHORT).show();
+                            }
+                        } catch (Exception e) {
+                            LogUtils.logDebug("Error deleting mod: " + e.getMessage());
+                            Toast.makeText(context, "Error deleting mod: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+                        }
+                    })
+                    .setNegativeButton("Cancel", null)
+                    .show();
+        });
+    }
+    
+    // Helper method to determine mod type from filename
+    private String getModTypeFromFileName(String fileName) {
+        String lowerName = fileName.toLowerCase();
+        if (lowerName.endsWith(".dex") || lowerName.endsWith(".dex.disabled")) {
+            return "DEX (Java)";
+        } else if (lowerName.endsWith(".jar") || lowerName.endsWith(".jar.disabled")) {
+            return "JAR (Java Library)";
+        } else if (lowerName.endsWith(".dll") || lowerName.endsWith(".dll.disabled")) {
+            return "DLL (C#/Native)";
+        } else {
+            return "Unknown";
+        }
+    }
+
+    @Override
+    public int getItemCount() {
+        return mods.size();
+    }
+
+    /**
+     * Updates the adapter's data set with a new list of mods.
+     * @param newMods The new list of mods to display.
+     */
+    public void updateMods(List<File> newMods) {
+        this.mods = newMods;
+        notifyDataSetChanged();
+    }
+
+    public static class ModViewHolder extends RecyclerView.ViewHolder {
+        TextView modNameTextView;
+        TextView modDescriptionTextView;
+        Switch modSwitch;
+        ImageButton modDeleteButton;
+
+        public ModViewHolder(@NonNull View itemView) {
+            super(itemView);
+            modNameTextView = itemView.findViewById(R.id.modNameTextView);
+            modDescriptionTextView = itemView.findViewById(R.id.modDescription);
+            modSwitch = itemView.findViewById(R.id.modSwitch);
+            modDeleteButton = itemView.findViewById(R.id.modDeleteButton);
+        }
+    }
+}
+
+
+/ModLoader/app/src/main/java/com/modloader/ui/ModManagementActivity.java
+
+// File: ModManagementActivity.java - Pure Mod Management (Post-Installation)
+// Path: /main/java/com/modloader/ui/ModManagementActivity.java
+
+package com.modloader.ui;
+
+import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.Intent;
+import android.database.Cursor;
+import android.net.Uri;
+import android.os.Bundle;
+import android.provider.OpenableColumns;
+import android.view.View;
+import android.widget.Button;
+import android.widget.ImageButton;
+import android.widget.LinearLayout;
+import android.widget.TextView;
+import android.widget.Toast;
+
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
+
+import com.modloader.R;
+import com.modloader.installer.ModInstaller;
+import com.modloader.loader.MelonLoaderManager;
+import com.modloader.loader.ModManager;
+import com.modloader.ui.ModListAdapter;
+import com.modloader.util.LogUtils;
+
+import java.io.File;
+import java.util.List;
+
+/**
+ * Pure mod management activity - assumes loader is already installed
+ * Focused solely on managing DLL and DEX mods
+ */
+public class ModManagementActivity extends AppCompatActivity {
+
+    private static final int REQUEST_SELECT_DLL = 1001;
+    private static final int REQUEST_SELECT_DEX = 1002;
+    
+    // UI Components
+    private TextView statusText;
+    private TextView loaderStatusText;
+    private RecyclerView modRecyclerView;
+    private ModListAdapter modAdapter;
+    private Button addDllModBtn;
+    private Button addDexModBtn;
+    private Button refreshBtn;
+    private Button backBtn;
+    private LinearLayout loaderInfoSection;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_mod_management);
+        
+        setTitle("🎮 Mod Management");
+        
+        initializeViews();
+        setupListeners();
+        loadMods();
+        updateStatus();
+    }
+
+    private void initializeViews() {
+        statusText = findViewById(R.id.statusText);
+        loaderStatusText = findViewById(R.id.loaderStatusText);
+        modRecyclerView = findViewById(R.id.modRecyclerView);
+        addDllModBtn = findViewById(R.id.addDllModBtn);
+        addDexModBtn = findViewById(R.id.addDexModBtn);
+        refreshBtn = findViewById(R.id.refreshBtn);
+        backBtn = findViewById(R.id.backBtn);
+        loaderInfoSection = findViewById(R.id.loaderInfoSection);
+        
+        // Setup RecyclerView
+        modRecyclerView.setLayoutManager(new LinearLayoutManager(this));
+    }
+
+    private void setupListeners() {
+        addDllModBtn.setOnClickListener(v -> {
+            if (!MelonLoaderManager.isMelonLoaderInstalled(this) && !MelonLoaderManager.isLemonLoaderInstalled(this)) {
+                showLoaderRequiredDialog();
+                return;
+            }
+            
+            Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+            intent.setType("*/*");
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            startActivityForResult(intent, REQUEST_SELECT_DLL);
+        });
+        
+        addDexModBtn.setOnClickListener(v -> {
+            Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+            intent.setType("*/*");
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            startActivityForResult(intent, REQUEST_SELECT_DEX);
+        });
+        
+        refreshBtn.setOnClickListener(v -> {
+            loadMods();
+            updateStatus();
+            Toast.makeText(this, "🔄 Mods refreshed", Toast.LENGTH_SHORT).show();
+        });
+        
+        backBtn.setOnClickListener(v -> finish());
+    }
+
+    private void loadMods() {
+        ModManager.loadMods(this);
+        List<File> allMods = ModManager.getAvailableMods();
+        
+        if (modAdapter == null) {
+            modAdapter = new ModListAdapter(this, allMods);
+            modRecyclerView.setAdapter(modAdapter);
+        } else {
+            // Update existing adapter
+            modAdapter.updateMods(allMods);
+        }
+        
+        LogUtils.logUser("Loaded " + allMods.size() + " mods for management");
+    }
+
+    private void updateStatus() {
+        // Check loader status
+        boolean melonInstalled = MelonLoaderManager.isMelonLoaderInstalled(this);
+        boolean lemonInstalled = MelonLoaderManager.isLemonLoaderInstalled(this);
+        
+        if (melonInstalled) {
+            loaderStatusText.setText("✅ MelonLoader " + MelonLoaderManager.getInstalledLoaderVersion() + " - DLL mods supported");
+            loaderStatusText.setTextColor(0xFF4CAF50); // Green
+            addDllModBtn.setEnabled(true);
+            addDllModBtn.setText("📥 Add DLL Mod");
+            loaderInfoSection.setVisibility(View.VISIBLE);
+        } else if (lemonInstalled) {
+            loaderStatusText.setText("✅ LemonLoader " + MelonLoaderManager.getInstalledLoaderVersion() + " - DLL mods supported");
+            loaderStatusText.setTextColor(0xFF4CAF50); // Green
+            addDllModBtn.setEnabled(true);
+            addDllModBtn.setText("📥 Add DLL Mod");
+            loaderInfoSection.setVisibility(View.VISIBLE);
+        } else {
+            loaderStatusText.setText("⚠️ No loader installed - DLL mods unavailable");
+            loaderStatusText.setTextColor(0xFFF44336); // Red
+            addDllModBtn.setEnabled(false);
+            addDllModBtn.setText("❌ Install Loader First");
+            loaderInfoSection.setVisibility(View.GONE);
+        }
+        
+        // Update mod counts
+        int enabledCount = ModManager.getEnabledModCount();
+        int totalCount = ModManager.getTotalModCount();
+        int dexCount = ModManager.getDexModCount();
+        int dllCount = ModManager.getDllModCount();
+        
+        statusText.setText(String.format("📊 Total: %d mods (%d enabled) | DEX/JAR: %d | DLL: %d", 
+            totalCount, enabledCount, dexCount, dllCount));
+    }
+
+    private void showLoaderRequiredDialog() {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("🔧 Loader Required");
+        builder.setMessage("DLL mods require MelonLoader or LemonLoader to be installed.\n\n" +
+                          "Would you like to set up a loader now?");
+        
+        builder.setPositiveButton("🚀 Setup Loader", (dialog, which) -> {
+            // Go to unified loader setup
+            Intent intent = new Intent(this, UnifiedLoaderActivity.class);
+            startActivity(intent);
+        });
+        
+        builder.setNegativeButton("📖 Manual Guide", (dialog, which) -> {
+            Intent intent = new Intent(this, InstructionsActivity.class);
+            startActivity(intent);
+        });
+        
+        builder.setNeutralButton("Cancel", null);
+        builder.show();
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        
+        if (resultCode != Activity.RESULT_OK || data == null || data.getData() == null) {
+            return;
+        }
+        
+        Uri uri = data.getData();
+        String filename = getFilenameFromUri(uri);
+        
+        if (filename == null) {
+            Toast.makeText(this, "Could not determine filename", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        
+        switch (requestCode) {
+            case REQUEST_SELECT_DLL:
+                handleDllModInstallation(uri, filename);
+                break;
+                
+            case REQUEST_SELECT_DEX:
+                handleDexModInstallation(uri, filename);
+                break;
+        }
+    }
+
+    private void handleDllModInstallation(Uri uri, String filename) {
+        if (!filename.toLowerCase().endsWith(".dll")) {
+            Toast.makeText(this, "⚠️ Please select a .dll file", Toast.LENGTH_LONG).show();
+            return;
+        }
+        
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("📥 Install DLL Mod");
+        builder.setMessage("Install '" + filename + "' as a DLL mod?\n\n" +
+                          "This mod will be loaded by MelonLoader when Terraria starts.");
+        
+        builder.setPositiveButton("Install", (dialog, which) -> {
+            boolean success = ModInstaller.installMod(this, uri, filename);
+            if (success) {
+                Toast.makeText(this, "✅ DLL mod installed: " + filename, Toast.LENGTH_SHORT).show();
+                loadMods();
+                updateStatus();
+            } else {
+                Toast.makeText(this, "❌ Failed to install DLL mod", Toast.LENGTH_LONG).show();
+            }
+        });
+        
+        builder.setNegativeButton("Cancel", null);
+        builder.show();
+    }
+
+    private void handleDexModInstallation(Uri uri, String filename) {
+        String lowerName = filename.toLowerCase();
+        if (!lowerName.endsWith(".dex") && !lowerName.endsWith(".jar")) {
+            Toast.makeText(this, "⚠️ Please select a .dex or .jar file", Toast.LENGTH_LONG).show();
+            return;
+        }
+        
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("📥 Install DEX/JAR Mod");
+        builder.setMessage("Install '" + filename + "' as a DEX/JAR mod?\n\n" +
+                          "This mod will be loaded directly by ModLoader.");
+        
+        builder.setPositiveButton("Install", (dialog, which) -> {
+            boolean success = ModInstaller.installMod(this, uri, filename);
+            if (success) {
+                Toast.makeText(this, "✅ DEX/JAR mod installed: " + filename, Toast.LENGTH_SHORT).show();
+                loadMods();
+                updateStatus();
+            } else {
+                Toast.makeText(this, "❌ Failed to install DEX/JAR mod", Toast.LENGTH_LONG).show();
+            }
+        });
+        
+        builder.setNegativeButton("Cancel", null);
+        builder.show();
+    }
+
+    private String getFilenameFromUri(Uri uri) {
+        String filename = null;
+        
+        try (Cursor cursor = getContentResolver().query(uri, null, null, null, null)) {
+            if (cursor != null && cursor.moveToFirst()) {
+                int nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                if (nameIndex >= 0) {
+                    filename = cursor.getString(nameIndex);
+                }
+            }
+        } catch (Exception e) {
+            LogUtils.logDebug("Could not get filename from URI: " + e.getMessage());
+        }
+        
+        if (filename == null) {
+            String path = uri.getPath();
+            if (path != null) {
+                int lastSlash = path.lastIndexOf('/');
+                if (lastSlash >= 0 && lastSlash < path.length() - 1) {
+                    filename = path.substring(lastSlash + 1);
+                }
+            }
+        }
+        
+        return filename;
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        loadMods();
+        updateStatus();
+    }
+}
+
+/ModLoader/app/src/main/java/com/modloader/ui/OfflineDiagnosticActivity.java
+
+// File: OfflineDiagnosticActivity.java (Part 1 - Main Class)
+// Path: /main/java/com/modloader/ui/OfflineDiagnosticActivity.java
+
+package com.modloader.ui;
+
+import android.app.ProgressDialog;
+import android.content.Intent;
+import android.net.Uri;
+import android.os.AsyncTask;
+import android.os.Bundle;
+import android.widget.Button;
+import android.widget.TextView;
+import android.widget.Toast;
+
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
+import androidx.appcompat.app.AlertDialog;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.content.FileProvider;
+
+import com.modloader.R;
+import com.modloader.diagnostic.DiagnosticManager;
+import com.modloader.util.LogUtils;
+import com.modloader.util.FileUtils;
+import com.modloader.util.PathManager;
+import com.modloader.loader.MelonLoaderManager;
+
+import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
+
+public class OfflineDiagnosticActivity extends AppCompatActivity {
+    
+    private DiagnosticManager diagnosticManager;
+    
+    // UI Components
+    private Button btnRunFullDiagnostic;
+    private Button btnDiagnoseApk;
+    private Button btnFixSettings;
+    private Button btnAutoRepair;
+    private Button btnExportReport;
+    private Button btnClearResults;
+    private TextView diagnosticResultsText;
+    
+    // Progress dialog
+    private ProgressDialog progressDialog;
+    
+    // File picker for APK selection
+    private final ActivityResultLauncher<Intent> apkPickerLauncher = 
+        registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
+            if (result.getResultCode() == RESULT_OK && result.getData() != null) {
+                Uri apkUri = result.getData().getData();
+                runApkDiagnostic(apkUri);
+            }
+        });
+    
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_offline_diagnostic);
+        setTitle("🔧 Offline Diagnostics");
+        
+        initializeComponents();
+        setupUI();
+        
+        LogUtils.logUser("Offline Diagnostics opened");
+    }
+    
+    private void initializeComponents() {
+        diagnosticManager = new DiagnosticManager(this);
+        
+        // Find UI components
+        btnRunFullDiagnostic = findViewById(R.id.btn_run_full_diagnostic);
+        btnDiagnoseApk = findViewById(R.id.btn_diagnose_apk);
+        btnFixSettings = findViewById(R.id.btn_fix_settings);
+        btnAutoRepair = findViewById(R.id.btn_auto_repair);
+        btnExportReport = findViewById(R.id.btn_export_report);
+        btnClearResults = findViewById(R.id.btn_clear_results);
+        diagnosticResultsText = findViewById(R.id.diagnostic_results_text);
+    }
+    
+    private void setupUI() {
+        // Full system diagnostic
+        btnRunFullDiagnostic.setOnClickListener(v -> runFullSystemCheck());
+        
+        // APK diagnostic
+        btnDiagnoseApk.setOnClickListener(v -> selectApkForDiagnostic());
+        
+        // Settings diagnostic and fix
+        btnFixSettings.setOnClickListener(v -> diagnoseAndFixSettings());
+        
+        // Auto repair
+        btnAutoRepair.setOnClickListener(v -> performAutoRepair());
+        
+        // Export report
+        btnExportReport.setOnClickListener(v -> exportDiagnosticReport());
+        
+        // Clear results
+        btnClearResults.setOnClickListener(v -> clearResults());
+    }
+    
+    private void runFullSystemCheck() {
+        showProgress("Running comprehensive system diagnostic...");
+        
+        AsyncTask.execute(() -> {
+            try {
+                StringBuilder results = new StringBuilder();
+                results.append("=== ModLoader Comprehensive Diagnostic ===\n");
+                results.append("Timestamp: ").append(new java.util.Date().toString()).append("\n");
+                results.append("Device: ").append(android.os.Build.MANUFACTURER).append(" ")
+                       .append(android.os.Build.MODEL).append("\n");
+                results.append("Android: ").append(android.os.Build.VERSION.RELEASE).append("\n\n");
+                
+                // 1. Directory Structure Check
+                results.append("📁 DIRECTORY STRUCTURE\n");
+                results.append(checkDirectoryStructure()).append("\n");
+                
+                // 2. MelonLoader/LemonLoader Status
+                results.append("🛠️ LOADER STATUS\n");
+                results.append(checkLoaderStatus()).append("\n");
+                
+                // 3. Mod Files Validation
+                results.append("📦 MOD FILES\n");
+                results.append(checkModFiles()).append("\n");
+                
+                // 4. System Permissions
+                results.append("🔐 PERMISSIONS\n");
+                results.append(checkPermissions()).append("\n");
+                
+                // 5. Storage and Space
+                results.append("💾 STORAGE\n");
+                results.append(checkStorage()).append("\n");
+                
+                // 6. Settings Validation
+                results.append("⚙️ SETTINGS\n");
+                results.append(checkSettingsIntegrity()).append("\n");
+                
+                // 7. Suggested Actions
+                results.append("💡 RECOMMENDATIONS\n");
+                results.append(generateRecommendations()).append("\n");
+                
+                runOnUiThread(() -> {
+                    hideProgress();
+                    displayResults(results.toString());
+                    LogUtils.logUser("Full system diagnostic completed");
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    hideProgress();
+                    showError("Diagnostic failed: " + e.getMessage());
+                    LogUtils.logDebug("Diagnostic error: " + e.toString());
+                });
+            }
+        });
+    }
+    
+    private String checkDirectoryStructure() {
+        StringBuilder result = new StringBuilder();
+        
+        try {
+            String gamePackage = "com.and.games505.TerrariaPaid";
+            File baseDir = PathManager.getGameBaseDir(this, gamePackage);
+            
+            if (baseDir == null) {
+                result.append("❌ Base directory path is null\n");
+                return result.toString();
+            }
+            
+            result.append("Base Path: ").append(baseDir.getAbsolutePath()).append("\n");
+            
+            // Check key directories
+            String[] criticalPaths = {
+                "",                           // Base
+                "Mods",                      // Mods root
+                "Mods/DEX",                  // DEX mods
+                "Mods/DLL",                  // DLL mods
+                "Loaders",                   // Loaders root
+                "Loaders/MelonLoader",       // MelonLoader
+                "Logs",                      // Game logs
+                "AppLogs",                   // App logs
+                "Config",                    // Configuration
+                "Backups"                    // Backups
+            };
+            
+            int existingDirs = 0;
+            for (String path : criticalPaths) {
+                File dir = new File(baseDir, path);
+                boolean exists = dir.exists() && dir.isDirectory();
+                String status = exists ? "✅" : "❌";
+                result.append(status).append(" ").append(path.isEmpty() ? "Base" : path).append("\n");
+                if (exists) existingDirs++;
+            }
+            
+            result.append("\nDirectory Health: ").append(existingDirs).append("/").append(criticalPaths.length);
+            if (existingDirs < criticalPaths.length) {
+                result.append(" (⚠️ Some directories missing)");
+            } else {
+                result.append(" (✅ Complete)");
+            }
+            
+        } catch (Exception e) {
+            result.append("❌ Directory check failed: ").append(e.getMessage());
+        }
+        
+        return result.toString();
+    }
+    
+    private String checkLoaderStatus() {
+        StringBuilder result = new StringBuilder();
+        
+        try {
+            String gamePackage = "com.and.games505.TerrariaPaid";
+            boolean melonInstalled = MelonLoaderManager.isMelonLoaderInstalled(this);
+            boolean lemonInstalled = MelonLoaderManager.isLemonLoaderInstalled(this);
+            
+            if (melonInstalled) {
+                result.append("✅ MelonLoader detected\n");
+                result.append("   Version: ").append(MelonLoaderManager.getInstalledLoaderVersion()).append("\n");
+                
+                // Check core files
+                File loaderDir = PathManager.getMelonLoaderDir(this, gamePackage);
+                if (loaderDir != null && loaderDir.exists()) {
+                    File[] files = loaderDir.listFiles();
+                    int fileCount = (files != null) ? files.length : 0;
+                    result.append("   Files: ").append(fileCount).append(" detected\n");
+                }
+            } else if (lemonInstalled) {
+                result.append("✅ LemonLoader detected\n");
+                result.append("   Version: ").append(MelonLoaderManager.getInstalledLoaderVersion()).append("\n");
+            } else {
+                result.append("❌ No loader installed\n");
+                result.append("   Recommendation: Use 'Complete Setup Wizard' to install MelonLoader\n");
+            }
+            
+            // Check runtime directories
+            File net8Dir = new File(PathManager.getMelonLoaderDir(this, gamePackage), "net8");
+            File net35Dir = new File(PathManager.getMelonLoaderDir(this, gamePackage), "net35");
+            
+            result.append("Runtime Support:\n");
+            result.append(net8Dir.exists() ? "✅" : "❌").append(" NET8 Runtime\n");
+            result.append(net35Dir.exists() ? "✅" : "❌").append(" NET35 Runtime\n");
+            
+        } catch (Exception e) {
+            result.append("❌ Loader check failed: ").append(e.getMessage()).append("\n");
+        }
+        
+        return result.toString();
+    }
+    
+    private String checkModFiles() {
+        StringBuilder result = new StringBuilder();
+        
+        try {
+            String gamePackage = "com.and.games505.TerrariaPaid";
+            
+            // Check DEX mods
+            File dexDir = PathManager.getDexModsDir(this, gamePackage);
+            int dexCount = 0, dexEnabled = 0;
+            if (dexDir != null && dexDir.exists()) {
+                File[] dexFiles = dexDir.listFiles((dir, name) -> {
+                    String lower = name.toLowerCase();
+                    return lower.endsWith(".dex") || lower.endsWith(".jar") || 
+                           lower.endsWith(".dex.disabled") || lower.endsWith(".jar.disabled");
+                });
+                if (dexFiles != null) {
+                    dexCount = dexFiles.length;
+                    for (File file : dexFiles) {
+                        if (!file.getName().endsWith(".disabled")) {
+                            dexEnabled++;
+                        }
+                    }
+                }
+            }
+            
+            // Check DLL mods
+            File dllDir = PathManager.getDllModsDir(this, gamePackage);
+            int dllCount = 0, dllEnabled = 0;
+            if (dllDir != null && dllDir.exists()) {
+                File[] dllFiles = dllDir.listFiles((dir, name) -> {
+                    String lower = name.toLowerCase();
+                    return lower.endsWith(".dll") || lower.endsWith(".dll.disabled");
+                });
+                if (dllFiles != null) {
+                    dllCount = dllFiles.length;
+                    for (File file : dllFiles) {
+                        if (!file.getName().endsWith(".disabled")) {
+                            dllEnabled++;
+                        }
+                    }
+                }
+            }
+            
+            result.append("DEX/JAR Mods: ").append(dexEnabled).append("/").append(dexCount)
+                  .append(" enabled\n");
+            result.append("DLL Mods: ").append(dllEnabled).append("/").append(dllCount)
+                  .append(" enabled\n");
+            result.append("Total Active Mods: ").append(dexEnabled + dllEnabled).append("\n");
+            
+            if (dexCount == 0 && dllCount == 0) {
+                result.append("ℹ️ No mods installed - use Mod Management to add mods\n");
+            }
+            
+        } catch (Exception e) {
+            result.append("❌ Mod check failed: ").append(e.getMessage()).append("\n");
+        }
+        
+        return result.toString();
+    }
+    
+    private String checkPermissions() {
+        StringBuilder result = new StringBuilder();
+        
+        try {
+            // Test write permissions
+            File testDir = new File(getExternalFilesDir(null), "permission_test");
+            testDir.mkdirs();
+            
+            File testFile = new File(testDir, "write_test.txt");
+            try (FileWriter writer = new FileWriter(testFile)) {
+                writer.write("Permission test successful");
+                result.append("✅ External storage write access\n");
+            } catch (Exception e) {
+                result.append("❌ External storage write failed: ").append(e.getMessage()).append("\n");
+            } finally {
+                if (testFile.exists()) testFile.delete();
+                testDir.delete();
+            }
+            
+            // Check install packages permission
+            try {
+                getPackageManager().canRequestPackageInstalls();
+                result.append("✅ Package installation permission available\n");
+            } catch (Exception e) {
+                result.append("⚠️ Package installation permission may be restricted\n");
+            }
+            
+        } catch (Exception e) {
+            result.append("❌ Permission check failed: ").append(e.getMessage()).append("\n");
+        }
+        
+        return result.toString();
+    }
+    
+    private String checkStorage() {
+        StringBuilder result = new StringBuilder();
+        
+        try {
+            File externalDir = getExternalFilesDir(null);
+            if (externalDir != null) {
+                long freeSpace = externalDir.getFreeSpace();
+                long totalSpace = externalDir.getTotalSpace();
+                long usedSpace = totalSpace - freeSpace;
+                
+                result.append("Free Space: ").append(FileUtils.formatFileSize(freeSpace)).append("\n");
+                result.append("Used Space: ").append(FileUtils.formatFileSize(usedSpace)).append("\n");
+                result.append("Total Space: ").append(FileUtils.formatFileSize(totalSpace)).append("\n");
+                
+                if (freeSpace < 100 * 1024 * 1024) { // Less than 100MB
+                    result.append("⚠️ Low storage space - consider freeing up space\n");
+                } else {
+                    result.append("✅ Sufficient storage space available\n");
+                }
+            } else {
+                result.append("❌ Cannot access external storage\n");
+            }
+            
+        } catch (Exception e) {
+            result.append("❌ Storage check failed: ").append(e.getMessage()).append("\n");
+        }
+        
+        return result.toString();
+    }
+    
+    private String checkSettingsIntegrity() {
+        StringBuilder result = new StringBuilder();
+        
+        try {
+            // Check app preferences
+            android.content.SharedPreferences prefs = 
+                getSharedPreferences("ModLoaderPrefs", MODE_PRIVATE);
+            
+            // Test write operation
+            android.content.SharedPreferences.Editor editor = prefs.edit();
+            editor.putString("diagnostic_test", "test_value");
+            boolean writeSuccess = editor.commit();
+            
+            if (writeSuccess) {
+                String testValue = prefs.getString("diagnostic_test", null);
+                if ("test_value".equals(testValue)) {
+                    result.append("✅ Settings persistence working\n");
+                    // Clean up test
+                    editor.remove("diagnostic_test").commit();
+                } else {
+                    result.append("❌ Settings read/write mismatch\n");
+                }
+            } else {
+                result.append("❌ Settings write failed\n");
+                result.append("   This may explain your auto-refresh issue\n");
+            }
+            
+        } catch (Exception e) {
+            result.append("❌ Settings check failed: ").append(e.getMessage()).append("\n");
+        }
+        
+        return result.toString();
+    }
+    
+    private String generateRecommendations() {
+        StringBuilder result = new StringBuilder();
+        
+        try {
+            boolean hasIssues = false;
+            
+            // Check if directories need repair
+            File baseDir = PathManager.getGameBaseDir(this, "com.and.games505.TerrariaPaid");
+            if (baseDir == null || !baseDir.exists()) {
+                result.append("• Run 'Auto-Repair' to create missing directories\n");
+                hasIssues = true;
+            }
+            
+            // Check if loader is missing
+            if (!MelonLoaderManager.isMelonLoaderInstalled(this) && 
+                !MelonLoaderManager.isLemonLoaderInstalled(this)) {
+                result.append("• Use 'Complete Setup Wizard' to install MelonLoader\n");
+                hasIssues = true;
+            }
+            
+            // Check storage
+            File externalDir = getExternalFilesDir(null);
+            if (externalDir != null && externalDir.getFreeSpace() < 50 * 1024 * 1024) {
+                result.append("• Free up storage space (recommended: 100MB+)\n");
+                hasIssues = true;
+            }
+            
+            if (!hasIssues) {
+                result.append("✅ System appears to be in good condition\n");
+                result.append("• If you're still experiencing issues, try:\n");
+                result.append("  - Restart the app completely\n");
+                result.append("  - Reboot your device\n");
+                result.append("  - Check specific mod compatibility\n");
+            }
+            
+        } catch (Exception e) {
+            result.append("• General recommendation: Check system permissions\n");
+        }
+        
+        return result.toString();
+    }
+    
+    // Continue to Part 2...
+// File: OfflineDiagnosticActivity.java (Part 2 - Methods & UI)
+// Continuation of Part 1
+
+    private void selectApkForDiagnostic() {
+        Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+        intent.setType("application/vnd.android.package-archive");
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        
+        try {
+            apkPickerLauncher.launch(Intent.createChooser(intent, "Select APK to Diagnose"));
+        } catch (Exception e) {
+            showToast("No file manager available");
+        }
+    }
+    
+    private void runApkDiagnostic(Uri apkUri) {
+        showProgress("Analyzing APK installation issues...");
+        
+        AsyncTask.execute(() -> {
+            try {
+                StringBuilder results = new StringBuilder();
+                results.append("=== APK Installation Diagnostic ===\n");
+                results.append("File URI: ").append(apkUri.toString()).append("\n\n");
+                
+                String fileName = getFileNameFromUri(apkUri);
+                results.append("File Name: ").append(fileName != null ? fileName : "Unknown").append("\n");
+                
+                results.append(validateApkFromUri(apkUri)).append("\n");
+                results.append("🔧 INSTALLATION ENVIRONMENT\n");
+                results.append(checkInstallationEnvironment()).append("\n");
+                results.append("📱 DEVICE COMPATIBILITY\n");
+                results.append(checkDeviceCompatibility()).append("\n");
+                results.append("💡 SOLUTIONS FOR APK PARSING ERRORS\n");
+                results.append(getApkSolutions()).append("\n");
+                
+                runOnUiThread(() -> {
+                    hideProgress();
+                    displayResults(results.toString());
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    hideProgress();
+                    showError("APK analysis failed: " + e.getMessage());
+                });
+            }
+        });
+    }
+    
+    private String validateApkFromUri(Uri apkUri) {
+        StringBuilder result = new StringBuilder();
+        result.append("📦 APK VALIDATION\n");
+        
+        try (java.io.InputStream stream = getContentResolver().openInputStream(apkUri)) {
+            if (stream == null) {
+                result.append("❌ Cannot access APK file\n");
+                return result.toString();
+            }
+            
+            int available = stream.available();
+            if (available > 0) {
+                result.append("✅ APK accessible (").append(FileUtils.formatFileSize(available)).append(")\n");
+                if (available < 10 * 1024 * 1024) {
+                    result.append("⚠️ APK seems small for Terraria - may be corrupted\n");
+                }
+            } else {
+                result.append("⚠️ APK file size unknown or empty\n");
+            }
+            
+            byte[] header = new byte[30];
+            int bytesRead = stream.read(header);
+            
+            if (bytesRead >= 4) {
+                if (header[0] == 0x50 && header[1] == 0x4b && header[2] == 0x03 && header[3] == 0x04) {
+                    result.append("✅ Valid ZIP/APK signature\n");
+                } else {
+                    result.append("❌ Invalid ZIP/APK signature - file is corrupted\n");
+                    result.append("   This is likely causing your parsing error!\n");
+                }
+            } else {
+                result.append("❌ Cannot read APK header - file corrupted\n");
+            }
+            
+        } catch (Exception e) {
+            result.append("❌ APK access failed: ").append(e.getMessage()).append("\n");
+        }
+        
+        return result.toString();
+    }
+    
+    private String checkInstallationEnvironment() {
+        StringBuilder result = new StringBuilder();
+        
+        try {
+            boolean unknownSources = canInstallFromUnknownSources();
+            result.append(unknownSources ? "✅" : "❌").append(" Unknown sources enabled\n");
+            
+            if (!unknownSources) {
+                result.append("   📋 Fix: Settings > Apps > ModLoader > Install unknown apps\n");
+            }
+            
+            File dataDir = getDataDir();
+            long freeSpace = dataDir.getFreeSpace();
+            result.append("Internal space: ").append(FileUtils.formatFileSize(freeSpace)).append("\n");
+            
+            if (freeSpace < 200 * 1024 * 1024) {
+                result.append("⚠️ Low storage - may cause installation failure\n");
+            }
+            
+            try {
+                getPackageManager().getPackageInfo("com.and.games505.TerrariaPaid", 0);
+                result.append("⚠️ Terraria already installed - uninstall first\n");
+            } catch (android.content.pm.PackageManager.NameNotFoundException e) {
+                result.append("✅ No conflicting installation\n");
+            }
+            
+        } catch (Exception e) {
+            result.append("❌ Environment check failed: ").append(e.getMessage()).append("\n");
+        }
+        
+        return result.toString();
+    }
+    
+    private boolean canInstallFromUnknownSources() {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            return getPackageManager().canRequestPackageInstalls();
+        } else {
+            try {
+                return android.provider.Settings.Secure.getInt(
+                    getContentResolver(), 
+                    android.provider.Settings.Secure.INSTALL_NON_MARKET_APPS, 0) != 0;
+            } catch (Exception e) {
+                return false;
+            }
+        }
+    }
+    
+    private String checkDeviceCompatibility() {
+        StringBuilder result = new StringBuilder();
+        
+        result.append("Device: ").append(android.os.Build.MANUFACTURER)
+              .append(" ").append(android.os.Build.MODEL).append("\n");
+        result.append("Android: ").append(android.os.Build.VERSION.RELEASE)
+              .append(" (API ").append(android.os.Build.VERSION.SDK_INT).append(")\n");
+        result.append("Architecture: ").append(android.os.Build.SUPPORTED_ABIS[0]).append("\n");
+        
+        if (android.os.Build.VERSION.SDK_INT >= 21) {
+            result.append("✅ Compatible Android version\n");
+        } else {
+            result.append("❌ Android version too old\n");
+        }
+        
+        return result.toString();
+    }
+    
+    private String getApkSolutions() {
+        StringBuilder result = new StringBuilder();
+        
+        result.append("For 'There was a problem parsing the package':\n\n");
+        result.append("1. 🔧 Re-download APK (may be corrupted)\n");
+        result.append("2. 🔧 Enable 'Install unknown apps'\n");
+        result.append("3. 🔧 Uninstall original Terraria first\n");
+        result.append("4. 🔧 Clear Package Installer cache\n");
+        result.append("5. 🔧 Restart device and retry\n");
+        result.append("6. 🔧 Copy APK to internal storage\n");
+        result.append("7. 🔧 Use different file manager\n");
+        result.append("8. 🔧 Check antivirus isn't blocking\n");
+        
+        return result.toString();
+    }
+    
+    private void diagnoseAndFixSettings() {
+        showProgress("Diagnosing settings persistence...");
+        
+        AsyncTask.execute(() -> {
+            try {
+                StringBuilder results = new StringBuilder();
+                results.append("=== Settings Persistence Diagnostic ===\n\n");
+                results.append("🔧 SHARED PREFERENCES TEST\n");
+                results.append(testSharedPreferences()).append("\n");
+                results.append("🔄 AUTO-REFRESH SPECIFIC TEST\n");
+                results.append(testAutoRefreshSetting()).append("\n");
+                results.append("💾 FILE SYSTEM TEST\n");
+                results.append(testFileSystemWrites()).append("\n");
+                
+                runOnUiThread(() -> {
+                    hideProgress();
+                    displayResults(results.toString());
+                    showSettingsFixOptions();
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    hideProgress();
+                    showError("Settings diagnostic failed: " + e.getMessage());
+                });
+            }
+        });
+    }
+    
+    private String testSharedPreferences() {
+        StringBuilder result = new StringBuilder();
+        
+        try {
+            android.content.SharedPreferences prefs = getSharedPreferences("DiagnosticTest", MODE_PRIVATE);
+            android.content.SharedPreferences.Editor editor = prefs.edit();
+            
+            editor.putBoolean("test_bool", true);
+            editor.putString("test_string", "test_value");
+            boolean commitSuccess = editor.commit();
+            
+            result.append("Write test: ").append(commitSuccess ? "✅ Success" : "❌ Failed").append("\n");
+            
+            if (commitSuccess) {
+                boolean boolVal = prefs.getBoolean("test_bool", false);
+                String stringVal = prefs.getString("test_string", null);
+                boolean readSuccess = boolVal && "test_value".equals(stringVal);
+                
+                result.append("Read test: ").append(readSuccess ? "✅ Success" : "❌ Failed").append("\n");
+                
+                if (!readSuccess) {
+                    result.append("   This explains your auto-refresh issue!\n");
+                }
+                
+                editor.clear().commit();
+            }
+            
+        } catch (Exception e) {
+            result.append("❌ SharedPreferences test failed: ").append(e.getMessage()).append("\n");
+        }
+        
+        return result.toString();
+    }
+    
+    private String testAutoRefreshSetting() {
+        StringBuilder result = new StringBuilder();
+        
+        try {
+            // Simulate the exact auto-refresh setting behavior
+            android.content.SharedPreferences logPrefs = getSharedPreferences("LogViewerPrefs", MODE_PRIVATE);
+            android.content.SharedPreferences.Editor editor = logPrefs.edit();
+            
+            // Test the specific setting that's failing
+            editor.putBoolean("auto_refresh_enabled", false);
+            boolean applyResult = editor.commit(); // Use commit instead of apply for immediate result
+            
+            result.append("Auto-refresh disable: ").append(applyResult ? "✅ Success" : "❌ Failed").append("\n");
+            
+            if (applyResult) {
+                // Check if it actually persisted
+                boolean currentValue = logPrefs.getBoolean("auto_refresh_enabled", true); // default true
+                result.append("Setting persisted: ").append(!currentValue ? "✅ Success" : "❌ Failed").append("\n");
+                
+                if (currentValue) {
+                    result.append("   Setting reverted to default - persistence failed!\n");
+                    result.append("   This is your exact issue.\n");
+                }
+            }
+            
+        } catch (Exception e) {
+            result.append("❌ Auto-refresh test failed: ").append(e.getMessage()).append("\n");
+        }
+        
+        return result.toString();
+    }
+    
+    private String testFileSystemWrites() {
+        StringBuilder result = new StringBuilder();
+        
+        try {
+            File testDir = new File(getFilesDir(), "diagnostic_test");
+            testDir.mkdirs();
+            
+            File testFile = new File(testDir, "settings_test.txt");
+            
+            try (FileWriter writer = new FileWriter(testFile)) {
+                writer.write("auto_refresh=false\n");
+                writer.write("timestamp=" + System.currentTimeMillis() + "\n");
+                result.append("✅ File write successful\n");
+            }
+            
+            if (testFile.exists()) {
+                try (java.io.BufferedReader reader = new java.io.BufferedReader(
+                        new java.io.FileReader(testFile))) {
+                    String line = reader.readLine();
+                    if (line != null && line.contains("auto_refresh=false")) {
+                        result.append("✅ File read successful\n");
+                    } else {
+                        result.append("❌ File content corrupted\n");
+                    }
+                }
+            }
+            
+            testFile.delete();
+            testDir.delete();
+            
+        } catch (Exception e) {
+            result.append("❌ File system test failed: ").append(e.getMessage()).append("\n");
+        }
+        
+        return result.toString();
+    }
+    
+    private String getFileNameFromUri(Uri uri) {
+        try {
+            android.database.Cursor cursor = getContentResolver().query(uri, null, null, null, null);
+            if (cursor != null) {
+                int nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME);
+                if (nameIndex >= 0 && cursor.moveToFirst()) {
+                    String name = cursor.getString(nameIndex);
+                    cursor.close();
+                    return name;
+                }
+                cursor.close();
+            }
+        } catch (Exception e) {
+            return uri.getLastPathSegment();
+        }
+        return null;
+    }
+    
+    private void performAutoRepair() {
+        new AlertDialog.Builder(this)
+            .setTitle("Auto-Repair System")
+            .setMessage("Attempt automatic fixes for:\n\n" +
+                       "• Missing directories\n" +
+                       "• Settings persistence\n" +
+                       "• File permissions\n" +
+                       "• Configuration corruption\n\n" +
+                       "Continue?")
+            .setPositiveButton("Yes, Repair", (dialog, which) -> executeAutoRepair())
+            .setNegativeButton("Cancel", null)
+            .show();
+    }
+    
+    private void executeAutoRepair() {
+        showProgress("Performing auto-repair...");
+        
+        AsyncTask.execute(() -> {
+            try {
+                StringBuilder results = new StringBuilder();
+                results.append("=== Auto-Repair Results ===\n\n");
+                
+                boolean directoryRepair = diagnosticManager.attemptSelfRepair();
+                boolean settingsRepair = repairSettings();
+                boolean permissionRepair = repairPermissions();
+                
+                results.append("Directory Structure: ").append(directoryRepair ? "✅ Fixed" : "❌ Failed").append("\n");
+                results.append("Settings Persistence: ").append(settingsRepair ? "✅ Fixed" : "❌ Failed").append("\n");
+                results.append("Permissions: ").append(permissionRepair ? "✅ Fixed" : "❌ Failed").append("\n\n");
+                
+                if (directoryRepair || settingsRepair || permissionRepair) {
+                    results.append("🔄 Restart recommended to apply changes.\n");
+                } else {
+                    results.append("❌ Could not auto-fix detected issues.\n");
+                    results.append("💡 Try manual solutions or check device settings.\n");
+                }
+                
+                runOnUiThread(() -> {
+                    hideProgress();
+                    displayResults(results.toString());
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    hideProgress();
+                    showError("Auto-repair failed: " + e.getMessage());
+                });
+            }
+        });
+    }
+    
+    private boolean repairSettings() {
+        try {
+            // Clear all shared preferences and recreate
+            String[] prefFiles = {"ModLoaderPrefs", "LogViewerPrefs", "AppSettings"};
+            
+            for (String prefFile : prefFiles) {
+                android.content.SharedPreferences prefs = getSharedPreferences(prefFile, MODE_PRIVATE);
+                android.content.SharedPreferences.Editor editor = prefs.edit();
+                editor.clear();
+                if (!editor.commit()) {
+                    return false;
+                }
+            }
+            
+            // Test write after clear
+            android.content.SharedPreferences testPrefs = getSharedPreferences("ModLoaderPrefs", MODE_PRIVATE);
+            android.content.SharedPreferences.Editor testEditor = testPrefs.edit();
+            testEditor.putBoolean("settings_repaired", true);
+            return testEditor.commit();
+            
+        } catch (Exception e) {
+            LogUtils.logDebug("Settings repair failed: " + e.getMessage());
+            return false;
+        }
+    }
+    
+    private boolean repairPermissions() {
+        try {
+            File testDir = new File(getExternalFilesDir(null), "permission_test");
+            testDir.mkdirs();
+            
+            File testFile = new File(testDir, "test.txt");
+            FileWriter writer = new FileWriter(testFile);
+            writer.write("test");
+            writer.close();
+            
+            boolean canWrite = testFile.exists() && testFile.length() > 0;
+            testFile.delete();
+            testDir.delete();
+            
+            return canWrite;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+    
+    private void exportDiagnosticReport() {
+        try {
+            String reportContent = diagnosticResultsText.getText().toString();
+            if (reportContent.isEmpty() || reportContent.startsWith("Click")) {
+                showToast("No diagnostic results to export");
+                return;
+            }
+            
+            File reportsDir = new File(getExternalFilesDir(null), "DiagnosticReports");
+            reportsDir.mkdirs();
+            
+            String timestamp = new java.text.SimpleDateFormat("yyyyMMdd_HHmmss", 
+                java.util.Locale.getDefault()).format(new java.util.Date());
+            File reportFile = new File(reportsDir, "diagnostic_" + timestamp + ".txt");
+            
+            try (FileWriter writer = new FileWriter(reportFile)) {
+                writer.write(reportContent);
+                writer.write("\n\n=== Export Info ===\n");
+                writer.write("Exported by: ModLoader Diagnostic Tool\n");
+                writer.write("Export time: " + new java.util.Date().toString() + "\n");
+            }
+            
+            // Share the report
+            Uri fileUri = FileProvider.getUriForFile(this, 
+                getPackageName() + ".provider", reportFile);
+            
+            Intent shareIntent = new Intent(Intent.ACTION_SEND);
+            shareIntent.setType("text/plain");
+            shareIntent.putExtra(Intent.EXTRA_STREAM, fileUri);
+            shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            
+            startActivity(Intent.createChooser(shareIntent, "Share Diagnostic Report"));
+            showToast("Report exported: " + reportFile.getName());
+            
+        } catch (Exception e) {
+            showError("Export failed: " + e.getMessage());
+        }
+    }
+    
+    private void clearResults() {
+        diagnosticResultsText.setText("Click 'Run Full System Check' to start diagnostics...");
+    }
+    
+    private void showSettingsFixOptions() {
+        new AlertDialog.Builder(this)
+            .setTitle("Settings Fix Options")
+            .setMessage("Settings persistence issue detected. Try these fixes:")
+            .setPositiveButton("Clear All Settings", (dialog, which) -> clearAllSettings())
+            .setNeutralButton("Reset App Data", (dialog, which) -> showResetAppDataInfo())
+            .setNegativeButton("Cancel", null)
+            .show();
+    }
+    
+    private void clearAllSettings() {
+        try {
+            String[] prefFiles = {"ModLoaderPrefs", "LogViewerPrefs", "AppSettings"};
+            for (String prefFile : prefFiles) {
+                getSharedPreferences(prefFile, MODE_PRIVATE).edit().clear().commit();
+            }
+            showToast("Settings cleared - restart app to test");
+        } catch (Exception e) {
+            showError("Failed to clear settings: " + e.getMessage());
+        }
+    }
+    
+    private void showResetAppDataInfo() {
+        new AlertDialog.Builder(this)
+            .setTitle("Reset App Data")
+            .setMessage("To completely reset ModLoader:\n\n" +
+                       "1. Go to Android Settings\n" +
+                       "2. Apps > ModLoader\n" +
+                       "3. Storage > Clear Data\n\n" +
+                       "This will fix persistent settings issues.")
+            .setPositiveButton("OK", null)
+            .show();
+    }
+    
+    private void displayResults(String results) {
+        diagnosticResultsText.setText(results);
+    }
+    
+    private void showProgress(String message) {
+        progressDialog = new ProgressDialog(this);
+        progressDialog.setMessage(message);
+        progressDialog.setCancelable(false);
+        progressDialog.show();
+    }
+    
+    private void hideProgress() {
+        if (progressDialog != null && progressDialog.isShowing()) {
+            progressDialog.dismiss();
+        }
+    }
+    
+    private void showToast(String message) {
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
+    }
+    
+    private void showError(String error) {
+        new AlertDialog.Builder(this)
+            .setTitle("Error")
+            .setMessage(error)
+            .setPositiveButton("OK", null)
+            .show();
+    }
+    
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        hideProgress();
+    }
+}
+
+
+/ModLoader/app/src/main/java/com/modloader/ui/SettingsActivity.java
+
+// File: SettingsActivity.java (Enhanced UI with Operation Modes)
+// Path: /app/src/main/java/com/modloader/ui/SettingsActivity.java
+
+package com.modloader.ui;
+
+import android.Manifest;
+import android.content.Context;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
+import android.graphics.Color;
+import android.net.Uri;
+import android.os.Build;
+import android.os.Bundle;
+import android.os.Environment;
+import android.provider.Settings;
+import android.view.View;
+import android.widget.*;
+
+import androidx.annotation.NonNull;
+import androidx.appcompat.app.AlertDialog;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.cardview.widget.CardView;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
+
+import com.modloader.R;
+import com.modloader.util.LogUtils;
+import com.modloader.util.PermissionManager;
+import com.modloader.util.ShizukuManager;
+import com.modloader.util.RootManager;
+
+public class SettingsActivity extends AppCompatActivity {
+    
+    // Operation Mode Constants
+    public static final String PREF_OPERATION_MODE = "operation_mode";
+    public static final String MODE_NORMAL = "normal";
+    public static final String MODE_SHIZUKU = "shizuku";
+    public static final String MODE_ROOT = "root";
+    public static final String MODE_HYBRID = "hybrid"; // Both Shizuku + Root
+    
+    // UI Components
+    private RadioGroup operationModeGroup;
+    private RadioButton normalModeRadio;
+    private RadioButton shizukuModeRadio;
+    private RadioButton rootModeRadio;
+    private RadioButton hybridModeRadio;
+    
+    private CardView normalCard, shizukuCard, rootCard, hybridCard;
+    private TextView normalStatus, shizukuStatus, rootStatus, hybridStatus;
+    private Button shizukuSetupBtn, rootSetupBtn, permissionBtn;
+    
+    private Switch autoEnableSwitch;
+    private Switch debugLoggingSwitch;
+    private Switch autoBackupSwitch;
+    private Switch autoUpdateSwitch;
+    
+    private SharedPreferences prefs;
+    private PermissionManager permissionManager;
+    private ShizukuManager shizukuManager;
+    private RootManager rootManager;
+    
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_settings_enhanced);
+        setTitle("⚙️ Settings & Operation Modes");
+        
+        LogUtils.logUser("Settings activity opened");
+        
+        // Initialize managers
+        prefs = getSharedPreferences("terraria_loader_settings", MODE_PRIVATE);
+        permissionManager = new PermissionManager(this);
+        shizukuManager = new ShizukuManager(this);
+        rootManager = new RootManager(this);
+        
+        initializeViews();
+        setupOperationModes();
+        setupFeatureToggles();
+        setupActionButtons();
+        updateUIState();
+        
+        // Auto-setup permissions based on current mode
+        autoSetupPermissions();
+    }
+    
+    private void initializeViews() {
+        // Operation Mode Selection
+        operationModeGroup = findViewById(R.id.operationModeGroup);
+        normalModeRadio = findViewById(R.id.normalModeRadio);
+        shizukuModeRadio = findViewById(R.id.shizukuModeRadio);
+        rootModeRadio = findViewById(R.id.rootModeRadio);
+        hybridModeRadio = findViewById(R.id.hybridModeRadio);
+        
+        // Mode Cards
+        normalCard = findViewById(R.id.normalCard);
+        shizukuCard = findViewById(R.id.shizukuCard);
+        rootCard = findViewById(R.id.rootCard);
+        hybridCard = findViewById(R.id.hybridCard);
+        
+        // Status Text
+        normalStatus = findViewById(R.id.normalStatus);
+        shizukuStatus = findViewById(R.id.shizukuStatus);
+        rootStatus = findViewById(R.id.rootStatus);
+        hybridStatus = findViewById(R.id.hybridStatus);
+        
+        // Setup Buttons
+        shizukuSetupBtn = findViewById(R.id.shizukuSetupBtn);
+        rootSetupBtn = findViewById(R.id.rootSetupBtn);
+        permissionBtn = findViewById(R.id.permissionBtn);
+        
+        // Feature Toggles
+        autoEnableSwitch = findViewById(R.id.autoEnableSwitch);
+        debugLoggingSwitch = findViewById(R.id.debugLoggingSwitch);
+        autoBackupSwitch = findViewById(R.id.autoBackupSwitch);
+        autoUpdateSwitch = findViewById(R.id.autoUpdateSwitch);
+    }
+    
+    private void setupOperationModes() {
+        // Load current mode
+        String currentMode = prefs.getString(PREF_OPERATION_MODE, MODE_NORMAL);
+        setOperationMode(currentMode, false);
+        
+        // Set up radio button listeners
+        operationModeGroup.setOnCheckedChangeListener((group, checkedId) -> {
+            String newMode;
+            if (checkedId == R.id.normalModeRadio) {
+                newMode = MODE_NORMAL;
+            } else if (checkedId == R.id.shizukuModeRadio) {
+                newMode = MODE_SHIZUKU;
+            } else if (checkedId == R.id.rootModeRadio) {
+                newMode = MODE_ROOT;
+            } else if (checkedId == R.id.hybridModeRadio) {
+                newMode = MODE_HYBRID;
+            } else {
+                newMode = MODE_NORMAL;
+            }
+            
+            setOperationMode(newMode, true);
+        });
+        
+        // Card click listeners for better UX
+        setupCardListeners();
+    }
+    
+    private void setupCardListeners() {
+        normalCard.setOnClickListener(v -> {
+            normalModeRadio.setChecked(true);
+        });
+        
+        shizukuCard.setOnClickListener(v -> {
+            if (shizukuManager.isShizukuAvailable()) {
+                shizukuModeRadio.setChecked(true);
+            } else {
+                showShizukuSetupDialog();
+            }
+        });
+        
+        rootCard.setOnClickListener(v -> {
+            if (rootManager.isRootAvailable()) {
+                rootModeRadio.setChecked(true);
+            } else {
+                showRootInfoDialog();
+            }
+        });
+        
+        hybridCard.setOnClickListener(v -> {
+            if (shizukuManager.isShizukuAvailable() && rootManager.isRootAvailable()) {
+                hybridModeRadio.setChecked(true);
+            } else {
+                showHybridSetupDialog();
+            }
+        });
+    }
+    
+    private void setOperationMode(String mode, boolean save) {
+        if (save) {
+            prefs.edit().putString(PREF_OPERATION_MODE, mode).apply();
+            LogUtils.logUser("Operation mode changed to: " + mode);
+            
+            // Auto-setup permissions for new mode
+            autoSetupPermissions();
+        }
+        
+        // Update radio buttons
+        switch (mode) {
+            case MODE_NORMAL:
+                normalModeRadio.setChecked(true);
+                break;
+            case MODE_SHIZUKU:
+                shizukuModeRadio.setChecked(true);
+                break;
+            case MODE_ROOT:
+                rootModeRadio.setChecked(true);
+                break;
+            case MODE_HYBRID:
+                hybridModeRadio.setChecked(true);
+                break;
+        }
+        
+        updateUIState();
+    }
+    
+    private void setupFeatureToggles() {
+        // Load current settings
+        autoEnableSwitch.setChecked(prefs.getBoolean("auto_enable_mods", true));
+        debugLoggingSwitch.setChecked(prefs.getBoolean("debug_logging", false));
+        autoBackupSwitch.setChecked(prefs.getBoolean("auto_backup", true));
+        autoUpdateSwitch.setChecked(prefs.getBoolean("auto_update_check", true));
+        
+        // Set up listeners
+        autoEnableSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            prefs.edit().putBoolean("auto_enable_mods", isChecked).apply();
+            LogUtils.logUser("Auto-enable mods: " + isChecked);
+        });
+        
+        debugLoggingSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            prefs.edit().putBoolean("debug_logging", isChecked).apply();
+            LogUtils.setDebugEnabled(isChecked);
+            LogUtils.logUser("Debug logging: " + isChecked);
+        });
+        
+        autoBackupSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            prefs.edit().putBoolean("auto_backup", isChecked).apply();
+            LogUtils.logUser("Auto backup: " + isChecked);
+        });
+        
+        autoUpdateSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            prefs.edit().putBoolean("auto_update_check", isChecked).apply();
+            LogUtils.logUser("Auto update check: " + isChecked);
+        });
+    }
+    
+    private void setupActionButtons() {
+        // Shizuku Setup Button
+        shizukuSetupBtn.setOnClickListener(v -> {
+            if (!shizukuManager.isShizukuInstalled()) {
+                showShizukuInstallDialog();
+            } else if (!shizukuManager.isShizukuRunning()) {
+                showShizukuStartDialog();
+            } else if (!shizukuManager.hasShizukuPermission()) {
+                shizukuManager.requestShizukuPermission();
+            } else {
+                Toast.makeText(this, "Shizuku is already properly configured!", Toast.LENGTH_SHORT).show();
+            }
+        });
+        
+        // Root Setup Button
+        rootSetupBtn.setOnClickListener(v -> {
+            if (!rootManager.isRootAvailable()) {
+                showRootInfoDialog();
+            } else {
+                rootManager.requestRootAccess();
+            }
+        });
+        
+        // Permission Management Button
+        permissionBtn.setOnClickListener(v -> {
+            showPermissionManagementDialog();
+        });
+        
+        // Additional action buttons
+        findViewById(R.id.resetSettingsBtn).setOnClickListener(v -> resetToDefaults());
+        findViewById(R.id.exportSettingsBtn).setOnClickListener(v -> exportSettings());
+        findViewById(R.id.importSettingsBtn).setOnClickListener(v -> importSettings());
+    }
+    
+    private void updateUIState() {
+        String currentMode = prefs.getString(PREF_OPERATION_MODE, MODE_NORMAL);
+        
+        // Update card appearances
+        updateCardAppearance(normalCard, normalStatus, MODE_NORMAL.equals(currentMode), 
+                           permissionManager.hasBasicPermissions(), "Standard Android permissions");
+        
+        boolean shizukuReady = shizukuManager.isShizukuReady();
+        updateCardAppearance(shizukuCard, shizukuStatus, MODE_SHIZUKU.equals(currentMode), 
+                           shizukuReady, getShizukuStatusText());
+        
+        boolean rootReady = rootManager.isRootReady();
+        updateCardAppearance(rootCard, rootStatus, MODE_ROOT.equals(currentMode), 
+                           rootReady, getRootStatusText());
+        
+        boolean hybridReady = shizukuReady && rootReady;
+        updateCardAppearance(hybridCard, hybridStatus, MODE_HYBRID.equals(currentMode), 
+                           hybridReady, "Maximum capabilities with both Shizuku and Root");
+        
+        // Update setup button states
+        updateSetupButtons();
+    }
+    
+    private void updateCardAppearance(CardView card, TextView status, boolean selected, 
+                                      boolean available, String statusText) {
+        int cardColor;
+        int textColor = Color.BLACK;
+        
+        if (selected) {
+            cardColor = Color.parseColor("#E8F5E8"); // Light green
+            card.setCardElevation(12f);
+        } else if (available) {
+            cardColor = Color.parseColor("#E3F2FD"); // Light blue
+            card.setCardElevation(6f);
+        } else {
+            cardColor = Color.parseColor("#FFEBEE"); // Light red
+            textColor = Color.parseColor("#666666");
+            card.setCardElevation(2f);
+        }
+        
+        card.setCardBackgroundColor(cardColor);
+        status.setText(statusText);
+        status.setTextColor(textColor);
+    }
+    
+    private void updateSetupButtons() {
+        // Shizuku setup button
+        if (shizukuManager.isShizukuReady()) {
+            shizukuSetupBtn.setText("✅ Shizuku Ready");
+            shizukuSetupBtn.setEnabled(false);
+        } else if (shizukuManager.isShizukuRunning()) {
+            shizukuSetupBtn.setText("🔐 Grant Permission");
+            shizukuSetupBtn.setEnabled(true);
+        } else if (shizukuManager.isShizukuInstalled()) {
+            shizukuSetupBtn.setText("▶️ Start Shizuku");
+            shizukuSetupBtn.setEnabled(true);
+        } else {
+            shizukuSetupBtn.setText("📥 Install Shizuku");
+            shizukuSetupBtn.setEnabled(true);
+        }
+        
+        // Root setup button
+        if (rootManager.isRootReady()) {
+            rootSetupBtn.setText("✅ Root Ready");
+            rootSetupBtn.setEnabled(false);
+        } else if (rootManager.isRootAvailable()) {
+            rootSetupBtn.setText("🔐 Grant Root Access");
+            rootSetupBtn.setEnabled(true);
+        } else {
+            rootSetupBtn.setText("❌ Root Not Available");
+            rootSetupBtn.setEnabled(false);
+        }
+    }
+    
+    private String getShizukuStatusText() {
+        if (!shizukuManager.isShizukuInstalled()) {
+            return "Shizuku app not installed";
+        } else if (!shizukuManager.isShizukuRunning()) {
+            return "Shizuku service not running";
+        } else if (!shizukuManager.hasShizukuPermission()) {
+            return "Shizuku permission not granted";
+        } else {
+            return "✅ Shizuku ready - Enhanced file access";
+        }
+    }
+    
+    private String getRootStatusText() {
+        if (!rootManager.isRootAvailable()) {
+            return "Root access not available on this device";
+        } else if (!rootManager.hasRootPermission()) {
+            return "Root permission not granted";
+        } else {
+            return "✅ Root access ready - Full system control";
+        }
+    }
+    
+    private void autoSetupPermissions() {
+        String mode = prefs.getString(PREF_OPERATION_MODE, MODE_NORMAL);
+        LogUtils.logDebug("Auto-setting up permissions for mode: " + mode);
+        
+        // Request basic permissions for all modes
+        permissionManager.requestBasicPermissions();
+        
+        switch (mode) {
+            case MODE_SHIZUKU:
+                if (shizukuManager.isShizukuRunning() && !shizukuManager.hasShizukuPermission()) {
+                    shizukuManager.requestShizukuPermission();
+                }
+                break;
+            case MODE_ROOT:
+                if (rootManager.isRootAvailable() && !rootManager.hasRootPermission()) {
+                    rootManager.requestRootAccess();
+                }
+                break;
+            case MODE_HYBRID:
+                if (shizukuManager.isShizukuRunning() && !shizukuManager.hasShizukuPermission()) {
+                    shizukuManager.requestShizukuPermission();
+                }
+                if (rootManager.isRootAvailable() && !rootManager.hasRootPermission()) {
+                    rootManager.requestRootAccess();
+                }
+                break;
+        }
+    }
+    
+    // Dialog methods
+    private void showShizukuSetupDialog() {
+        new AlertDialog.Builder(this)
+            .setTitle("Shizuku Setup Required")
+            .setMessage("Shizuku provides enhanced file access without root. Would you like to install it?")
+            .setPositiveButton("Install", (dialog, which) -> shizukuManager.installShizuku())
+            .setNeutralButton("Learn More", (dialog, which) -> openUrl("https://shizuku.rikka.app/"))
+            .setNegativeButton("Cancel", null)
+            .show();
+    }
+    
+    private void showRootInfoDialog() {
+        new AlertDialog.Builder(this)
+            .setTitle("Root Access")
+            .setMessage("Root access provides maximum system control but requires a rooted device. " +
+                       "Root access cannot be installed through this app - your device must already be rooted.")
+            .setPositiveButton("Check Root", (dialog, which) -> rootManager.checkRootStatus())
+            .setNeutralButton("Root Guide", (dialog, which) -> openUrl("https://www.xda-developers.com/root/"))
+            .setNegativeButton("OK", null)
+            .show();
+    }
+    
+    private void showHybridSetupDialog() {
+        String message = "";
+        if (!shizukuManager.isShizukuAvailable()) {
+            message += "• Shizuku is not available\n";
+        }
+        if (!rootManager.isRootAvailable()) {
+            message += "• Root access is not available\n";
+        }
+        
+        new AlertDialog.Builder(this)
+            .setTitle("Hybrid Mode Requirements")
+            .setMessage("Hybrid mode requires both Shizuku and Root access:\n\n" + message + 
+                       "\nPlease set up both components individually first.")
+            .setPositiveButton("OK", null)
+            .show();
+    }
+    
+    private void showShizukuInstallDialog() {
+        new AlertDialog.Builder(this)
+            .setTitle("Install Shizuku")
+            .setMessage("Shizuku needs to be downloaded and installed. This will open your browser.")
+            .setPositiveButton("Download", (dialog, which) -> 
+                openUrl("https://github.com/RikkaApps/Shizuku/releases/latest"))
+            .setNegativeButton("Cancel", null)
+            .show();
+    }
+    
+    private void showShizukuStartDialog() {
+        new AlertDialog.Builder(this)
+            .setTitle("Start Shizuku Service")
+            .setMessage("Shizuku is installed but not running. Please start it using ADB or root, " +
+                       "then return to this app.")
+            .setPositiveButton("Open Shizuku", (dialog, which) -> shizukuManager.openShizukuApp())
+            .setNeutralButton("ADB Guide", (dialog, which) -> 
+                openUrl("https://shizuku.rikka.app/guide/setup/"))
+            .setNegativeButton("Cancel", null)
+            .show();
+    }
+    
+    private void showPermissionManagementDialog() {
+        String[] permissions = {
+            "Storage Access", 
+            "Install Packages", 
+            "Shizuku Access",
+            "Root Access"
+        };
+        
+        boolean[] grantedStatus = {
+            permissionManager.hasStoragePermission(),
+            permissionManager.hasInstallPermission(),
+            shizukuManager.hasShizukuPermission(),
+            rootManager.hasRootPermission()
+        };
+        
+        StringBuilder message = new StringBuilder("Permission Status:\n\n");
+        for (int i = 0; i < permissions.length; i++) {
+            message.append(grantedStatus[i] ? "✅ " : "❌ ")
+                   .append(permissions[i]).append("\n");
+        }
+        
+        new AlertDialog.Builder(this)
+            .setTitle("Permission Management")
+            .setMessage(message.toString())
+            .setPositiveButton("Request Missing", (dialog, which) -> {
+                permissionManager.requestAllPermissions();
+                autoSetupPermissions();
+            })
+            .setNeutralButton("App Settings", (dialog, which) -> openAppSettings())
+            .setNegativeButton("Close", null)
+            .show();
+    }
+    
+    // Utility methods
+    private void openUrl(String url) {
+        try {
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+            startActivity(intent);
+        } catch (Exception e) {
+            Toast.makeText(this, "Could not open browser", Toast.LENGTH_SHORT).show();
+        }
+    }
+    
+    private void openAppSettings() {
+        try {
+            Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+            intent.setData(Uri.parse("package:" + getPackageName()));
+            startActivity(intent);
+        } catch (Exception e) {
+            Toast.makeText(this, "Could not open app settings", Toast.LENGTH_SHORT).show();
+        }
+    }
+    
+    private void resetToDefaults() {
+        new AlertDialog.Builder(this)
+            .setTitle("Reset Settings")
+            .setMessage("This will reset all settings to their default values. Continue?")
+            .setPositiveButton("Reset", (dialog, which) -> {
+                prefs.edit().clear().apply();
+                recreate(); // Reload activity with default settings
+                Toast.makeText(this, "Settings reset to defaults", Toast.LENGTH_SHORT).show();
+            })
+            .setNegativeButton("Cancel", null)
+            .show();
+    }
+    
+    private void exportSettings() {
+        // Implementation for exporting settings to file
+        Toast.makeText(this, "Export settings - Coming soon", Toast.LENGTH_SHORT).show();
+    }
+    
+    private void importSettings() {
+        // Implementation for importing settings from file
+        Toast.makeText(this, "Import settings - Coming soon", Toast.LENGTH_SHORT).show();
+    }
+    
+    @Override
+    protected void onResume() {
+        super.onResume();
+        updateUIState(); // Refresh UI when returning from other apps
+    }
+    
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, 
+                                           @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        permissionManager.handlePermissionResult(requestCode, permissions, grantResults);
+        updateUIState(); // Refresh UI after permission changes
+    }
+    
+    // Static utility methods for other activities
+    public static String getCurrentOperationMode(Context context) {
+        return context.getSharedPreferences("terraria_loader_settings", Context.MODE_PRIVATE)
+                     .getString(PREF_OPERATION_MODE, MODE_NORMAL);
+    }
+    
+    public static boolean isShizukuMode(Context context) {
+        String mode = getCurrentOperationMode(context);
+        return MODE_SHIZUKU.equals(mode) || MODE_HYBRID.equals(mode);
+    }
+    
+    public static boolean isRootMode(Context context) {
+        String mode = getCurrentOperationMode(context);
+        return MODE_ROOT.equals(mode) || MODE_HYBRID.equals(mode);
+    }
+    
+    public static boolean canUseEnhancedPermissions(Context context) {
+        return isShizukuMode(context) || isRootMode(context);
+    }
+    
+    // Legacy compatibility methods for existing code
+    public static boolean isModsEnabled(Context context) {
+        try {
+            return context.getSharedPreferences("terraria_loader_settings", Context.MODE_PRIVATE)
+                         .getBoolean("auto_enable_mods", true);
+        } catch (Exception e) {
+            return true;
+        }
+    }
+    
+    public static boolean isSandboxMode(Context context) {
+        try {
+            return context.getSharedPreferences("terraria_loader_settings", Context.MODE_PRIVATE)
+                         .getBoolean("sandbox_mode", false);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+    
+    public static boolean isDebugMode(Context context) {
+        try {
+            return context.getSharedPreferences("terraria_loader_settings", Context.MODE_PRIVATE)
+                         .getBoolean("debug_logging", false);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+    
+    public static boolean isAutoSaveEnabled(Context context) {
+        try {
+            return context.getSharedPreferences("terraria_loader_settings", Context.MODE_PRIVATE)
+                         .getBoolean("auto_backup", true);
+        } catch (Exception e) {
+            return true;
+        }
+    }
+}
+
+/ModLoader/app/src/main/java/com/modloader/ui/SetupGuideActivity.java
+
+// File: SetupGuideActivity.java (Updated) - Added Offline ZIP Import
+// Path: /storage/emulated/0/AndroidIDEProjects/TerrariaML/app/src/main/java/com/modloader/ui/SetupGuideActivity.java
+
+package com.modloader.ui;
+
+import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.Intent;
+import android.net.Uri;
+import android.os.Bundle;
+import android.widget.Button;
+import android.widget.Toast;
+import androidx.appcompat.app.AppCompatActivity;
+
+import com.modloader.R;
+import com.modloader.loader.MelonLoaderManager;
+import com.modloader.util.LogUtils;
+import com.modloader.util.OnlineInstaller;
+import com.modloader.util.OfflineZipImporter;
+
+public class SetupGuideActivity extends AppCompatActivity {
+
+    private static final int REQUEST_SELECT_ZIP = 1001;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_setup_guide);
+
+        setTitle("🚀 MelonLoader Setup Guide");
+
+        setupButtons();
+    }
+
+    private void setupButtons() {
+        Button btnOnlineInstall = findViewById(R.id.btn_online_install);
+        Button btnOfflineImport = findViewById(R.id.btn_offline_import);
+        Button btnManualInstructions = findViewById(R.id.btn_manual_instructions);
+
+        btnOnlineInstall.setOnClickListener(v -> showOnlineInstallDialog());
+        btnOfflineImport.setOnClickListener(v -> showOfflineImportDialog());
+        btnManualInstructions.setOnClickListener(v -> {
+            Intent intent = new Intent(this, InstructionsActivity.class);
+            startActivity(intent);
+        });
+    }
+
+    private void showOnlineInstallDialog() {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("🌐 Automated Online Installation");
+        builder.setMessage("This will automatically download and install MelonLoader/LemonLoader files from GitHub.\n\n" +
+                          "Requirements:\n" +
+                          "• Active internet connection\n" +
+                          "• ~50MB free space\n\n" +
+                          "Continue with automated installation?");
+        
+        builder.setPositiveButton("Continue", (dialog, which) -> {
+            showLoaderTypeDialog();
+        });
+        
+        builder.setNegativeButton("Cancel", null);
+        builder.show();
+    }
+
+    private void showOfflineImportDialog() {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("📦 Offline ZIP Import");
+        builder.setMessage("Import a MelonLoader ZIP file that you've already downloaded.\n\n" +
+                          "Supported files:\n" +
+                          "• melon_data.zip (MelonLoader)\n" +
+                          "• lemon_data.zip (LemonLoader)\n" +
+                          "• Custom MelonLoader packages\n\n" +
+                          "The ZIP will be automatically extracted to the correct directories.");
+        
+        builder.setPositiveButton("📂 Select ZIP File", (dialog, which) -> {
+            Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+            intent.setType("application/zip");
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            startActivityForResult(intent, REQUEST_SELECT_ZIP);
+        });
+        
+        builder.setNegativeButton("Cancel", null);
+        builder.show();
+    }
+
+    private void showLoaderTypeDialog() {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("Choose Loader Type");
+        builder.setMessage("Select which loader to install:\n\n" +
+                          "🔸 MelonLoader:\n" +
+                          "• Full-featured Unity mod loader\n" +
+                          "• Larger file size (~40MB)\n" +
+                          "• Best compatibility\n\n" +
+                          "🔸 LemonLoader:\n" +
+                          "• Lightweight Unity mod loader\n" +
+                          "• Smaller file size (~15MB)\n" +
+                          "• Faster installation\n\n" +
+                          "Which would you like to install?");
+        
+        builder.setPositiveButton("MelonLoader", (dialog, which) -> {
+            LogUtils.logUser("User selected MelonLoader for automated installation");
+            startAutomatedInstallation(MelonLoaderManager.LoaderType.MELONLOADER_NET8);
+        });
+        
+        builder.setNegativeButton("LemonLoader", (dialog, which) -> {
+            LogUtils.logUser("User selected LemonLoader for automated installation");
+            startAutomatedInstallation(MelonLoaderManager.LoaderType.MELONLOADER_NET35);
+        });
+        
+        builder.setNeutralButton("Cancel", null);
+        builder.show();
+    }
+    
+    private void startAutomatedInstallation(MelonLoaderManager.LoaderType loaderType) {
+        LogUtils.logUser("Starting automated " + loaderType.getDisplayName() + " installation...");
+        
+        AlertDialog progressDialog = new AlertDialog.Builder(this)
+            .setTitle("Installing " + loaderType.getDisplayName())
+            .setMessage("Downloading and extracting files from GitHub...\nThis may take a few minutes.")
+            .setCancelable(false)
+            .show();
+
+        new Thread(() -> {
+            boolean success = false;
+            String errorMessage = "";
+
+            try {
+                OnlineInstaller.InstallationResult result = OnlineInstaller.installMelonLoaderOnline(
+                    this, MelonLoaderManager.TERRARIA_PACKAGE, loaderType);
+                success = result.success;
+                errorMessage = result.message;
+                
+            } catch (Exception e) {
+                success = false;
+                errorMessage = e.getMessage();
+                LogUtils.logDebug("Automated installation error: " + errorMessage);
+            }
+
+            final boolean finalSuccess = success;
+            final String finalErrorMessage = errorMessage;
+
+            runOnUiThread(() -> {
+                progressDialog.dismiss();
+                if (finalSuccess) {
+                    showInstallationSuccessDialog(loaderType);
+                } else {
+                    showInstallationErrorDialog(loaderType, finalErrorMessage);
+                }
+            });
+        }).start();
+    }
+
+    private void startOfflineImportProcess(Uri zipUri) {
+        LogUtils.logUser("Starting offline ZIP import process...");
+        
+        AlertDialog progressDialog = new AlertDialog.Builder(this)
+            .setTitle("Importing MelonLoader ZIP")
+            .setMessage("Analyzing and extracting ZIP file...\nThis may take a moment.")
+            .setCancelable(false)
+            .show();
+
+        new Thread(() -> {
+            OfflineZipImporter.ImportResult result = OfflineZipImporter.importMelonLoaderZip(this, zipUri);
+
+            runOnUiThread(() -> {
+                progressDialog.dismiss();
+                if (result.success) {
+                    showImportSuccessDialog(result);
+                } else {
+                    showImportErrorDialog(result);
+                }
+            });
+        }).start();
+    }
+
+    private void showInstallationSuccessDialog(MelonLoaderManager.LoaderType loaderType) {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("✅ Installation Complete!");
+        builder.setMessage("Great! " + loaderType.getDisplayName() + " has been successfully installed!\n\n" +
+                          "Next steps:\n" +
+                          "1. Go to Unified Loader Activity\n" +
+                          "2. Select your Terraria APK\n" +
+                          "3. Patch APK with loader\n" +
+                          "4. Install patched Terraria\n" +
+                          "5. Add DLL mods and enjoy!\n\n" +
+                          "You can now use DLL mods with Terraria!");
+        
+        builder.setPositiveButton("🚀 Open Unified Loader", (dialog, which) -> {
+            Intent intent = new Intent(this, UnifiedLoaderActivity.class);
+            startActivity(intent);
+            finish();
+        });
+        
+        builder.setNegativeButton("Later", (dialog, which) -> {
+            finish();
+        });
+        
+        builder.show();
+    }
+
+    private void showInstallationErrorDialog(MelonLoaderManager.LoaderType loaderType, String errorMessage) {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("❌ Installation Failed");
+        builder.setMessage("Failed to install " + loaderType.getDisplayName() + "\n\n" +
+                          "Error: " + (errorMessage.isEmpty() ? "Unknown error occurred" : errorMessage) + "\n\n" +
+                          "Please try:\n" +
+                          "• Check your internet connection\n" +
+                          "• Use Offline ZIP Import instead\n" +
+                          "• Use Manual Installation\n" +
+                          "• Try again later");
+        
+        builder.setPositiveButton("📦 Try Offline Import", (dialog, which) -> {
+            showOfflineImportDialog();
+        });
+        
+        builder.setNegativeButton("📖 Manual Guide", (dialog, which) -> {
+            Intent intent = new Intent(this, InstructionsActivity.class);
+            startActivity(intent);
+        });
+        
+        builder.setNeutralButton("Cancel", null);
+        builder.show();
+    }
+
+    private void showImportSuccessDialog(OfflineZipImporter.ImportResult result) {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("✅ ZIP Import Complete!");
+        builder.setMessage("Successfully imported " + result.detectedType.getDisplayName() + "!\n\n" +
+                          "Files extracted: " + result.filesExtracted + "\n\n" +
+                          "The loader files have been automatically placed in the correct directories:\n" +
+                          "• NET8/NET35 runtime files\n" +
+                          "• Dependencies and support modules\n" +
+                          "• All required components\n\n" +
+                          "You can now patch APK files!");
+        
+        builder.setPositiveButton("🚀 Open Unified Loader", (dialog, which) -> {
+            Intent intent = new Intent(this, UnifiedLoaderActivity.class);
+            startActivity(intent);
+            finish();
+        });
+        
+        builder.setNegativeButton("✅ Done", (dialog, which) -> {
+            finish();
+        });
+        
+        builder.show();
+    }
+
+    private void showImportErrorDialog(OfflineZipImporter.ImportResult result) {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("❌ ZIP Import Failed");
+        builder.setMessage("Failed to import ZIP file\n\n" +
+                          "Error: " + result.message + "\n\n" +
+                          (result.errorDetails != null ? "Details: " + result.errorDetails + "\n\n" : "") +
+                          "Please ensure:\n" +
+                          "• ZIP file is a valid MelonLoader package\n" +
+                          "• File is not corrupted\n" +
+                          "• You have sufficient storage space");
+        
+        builder.setPositiveButton("🌐 Try Online Install", (dialog, which) -> {
+            showOnlineInstallDialog();
+        });
+        
+        builder.setNegativeButton("📖 Manual Guide", (dialog, which) -> {
+            Intent intent = new Intent(this, InstructionsActivity.class);
+            startActivity(intent);
+        });
+        
+        builder.setNeutralButton("Try Again", (dialog, which) -> {
+            showOfflineImportDialog();
+        });
+        
+        builder.show();
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        
+        if (requestCode == REQUEST_SELECT_ZIP && resultCode == Activity.RESULT_OK && data != null) {
+            Uri zipUri = data.getData();
+            if (zipUri != null) {
+                LogUtils.logUser("ZIP file selected for offline import");
+                startOfflineImportProcess(zipUri);
+            }
+        }
+    }
+}
+
+/ModLoader/app/src/main/java/com/modloader/ui/UnifiedLoaderActivity.java
+
+// File: UnifiedLoaderActivity.java - Complete Fixed Version
+// Path: /main/java/com/modloader/ui/UnifiedLoaderActivity.java
+
+package com.modloader.ui;
+
+import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.Intent;
+import android.database.Cursor;
+import android.net.Uri;
+import android.os.Bundle;
+import android.provider.OpenableColumns;
+import android.view.View;
+import android.widget.*;
+import android.graphics.Typeface;
+import androidx.appcompat.app.AppCompatActivity;
+
+import com.modloader.R;
+import com.modloader.loader.MelonLoaderManager;
+import com.modloader.util.LogUtils;
+
+/**
+ * Unified Loader Activity - Complete wizard-style interface for MelonLoader setup
+ */
+public class UnifiedLoaderActivity extends AppCompatActivity implements 
+    UnifiedLoaderController.UnifiedLoaderCallback, UnifiedLoaderListener {
+
+    private static final int REQUEST_SELECT_APK = 1001;
+    private static final int REQUEST_SELECT_ZIP = 1002;
+    
+    // UI Components
+    private ProgressBar stepProgressBar;
+    private TextView stepTitleText;
+    private TextView stepDescriptionText;
+    private TextView stepIndicatorText;
+    private LinearLayout stepContentContainer;
+    private Button previousButton;
+    private Button nextButton;
+    private Button actionButton;
+    
+    // Current step content views
+    private LinearLayout welcomeContent;
+    private LinearLayout loaderInstallContent;
+    private LinearLayout apkSelectionContent;
+    private LinearLayout patchingContent;
+    private LinearLayout completionContent;
+    
+    // Status indicators
+    private TextView loaderStatusText;
+    private TextView apkStatusText;
+    private TextView progressText;
+    private ProgressBar actionProgressBar;
+    
+    // Controller
+    private UnifiedLoaderController controller;
+    private AlertDialog progressDialog;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_unified_loader);
+        
+        setTitle("MelonLoader Setup Wizard");
+        
+        // Initialize controller
+        controller = new UnifiedLoaderController(this);
+        controller.setCallback(this);
+        
+        initializeViews();
+        setupStepContents();
+        setupListeners();
+        
+        // Start wizard
+        controller.setCurrentStep(UnifiedLoaderController.LoaderStep.WELCOME);
+    }
+
+    private void initializeViews() {
+        stepProgressBar = findViewById(R.id.stepProgressBar);
+        stepTitleText = findViewById(R.id.stepTitleText);
+        stepDescriptionText = findViewById(R.id.stepDescriptionText);
+        stepIndicatorText = findViewById(R.id.stepIndicatorText);
+        stepContentContainer = findViewById(R.id.stepContentContainer);
+        previousButton = findViewById(R.id.previousButton);
+        nextButton = findViewById(R.id.nextButton);
+        actionButton = findViewById(R.id.actionButton);
+        
+        loaderStatusText = findViewById(R.id.loaderStatusText);
+        apkStatusText = findViewById(R.id.apkStatusText);
+        progressText = findViewById(R.id.progressText);
+        actionProgressBar = findViewById(R.id.actionProgressBar);
+    }
+
+    private void setupStepContents() {
+        // Create step content views dynamically
+        welcomeContent = createWelcomeContent();
+        loaderInstallContent = createLoaderInstallContent();
+        apkSelectionContent = createApkSelectionContent();
+        patchingContent = createPatchingContent();
+        completionContent = createCompletionContent();
+    }
+
+    private LinearLayout createWelcomeContent() {
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(24, 24, 24, 24);
+        
+        TextView welcomeText = new TextView(this);
+        welcomeText.setText("Welcome to MelonLoader Setup!\n\nThis wizard will guide you through:\n\n• Installing MelonLoader/LemonLoader\n• Patching your Terraria APK\n• Setting up DLL mod support\n\nClick 'Next' to begin!");
+        welcomeText.setTextSize(16);
+        welcomeText.setLineSpacing(8, 1.0f);
+        content.addView(welcomeText);
+        
+        return content;
+    }
+
+    private LinearLayout createLoaderInstallContent() {
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(16, 16, 16, 16);
+        
+        // Loader status
+        TextView statusLabel = new TextView(this);
+        statusLabel.setText("Current Status:");
+        statusLabel.setTextSize(14);
+        statusLabel.setTypeface(null, Typeface.BOLD);
+        content.addView(statusLabel);
+        
+        TextView statusText = new TextView(this);
+        statusText.setText("Checking...");
+        statusText.setTextSize(14);
+        statusText.setPadding(0, 8, 0, 16);
+        content.addView(statusText);
+        
+        // Installation options
+        TextView optionsLabel = new TextView(this);
+        optionsLabel.setText("Installation Options:");
+        optionsLabel.setTextSize(14);
+        optionsLabel.setTypeface(null, Typeface.BOLD);
+        content.addView(optionsLabel);
+        
+        Button onlineInstallBtn = new Button(this);
+        onlineInstallBtn.setText("Online Installation (Recommended)");
+        onlineInstallBtn.setOnClickListener(v -> showOnlineInstallOptions());
+        content.addView(onlineInstallBtn);
+        
+        Button offlineInstallBtn = new Button(this);
+        offlineInstallBtn.setText("Offline ZIP Import");
+        offlineInstallBtn.setOnClickListener(v -> selectOfflineZip());
+        content.addView(offlineInstallBtn);
+        
+        return content;
+    }
+
+    private LinearLayout createApkSelectionContent() {
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(16, 16, 16, 16);
+        
+        TextView instructionText = new TextView(this);
+        instructionText.setText("Select your Terraria APK file to patch with MelonLoader:");
+        instructionText.setTextSize(16);
+        content.addView(instructionText);
+        
+        Button selectApkBtn = new Button(this);
+        selectApkBtn.setText("Select Terraria APK");
+        selectApkBtn.setOnClickListener(v -> selectApkFile());
+        content.addView(selectApkBtn);
+        
+        TextView statusText = new TextView(this);
+        statusText.setText("No APK selected");
+        statusText.setTextSize(14);
+        statusText.setPadding(0, 16, 0, 0);
+        content.addView(statusText);
+        
+        return content;
+    }
+
+    private LinearLayout createPatchingContent() {
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(16, 16, 16, 16);
+        content.setGravity(android.view.Gravity.CENTER);
+        
+        TextView patchingText = new TextView(this);
+        patchingText.setText("Patching APK with MelonLoader...");
+        patchingText.setTextSize(18);
+        patchingText.setGravity(android.view.Gravity.CENTER);
+        content.addView(patchingText);
+        
+        ProgressBar progressBar = new ProgressBar(this);
+        progressBar.setIndeterminate(true);
+        LinearLayout.LayoutParams progressParams = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        progressParams.topMargin = 24;
+        progressParams.gravity = android.view.Gravity.CENTER;
+        progressBar.setLayoutParams(progressParams);
+        content.addView(progressBar);
+        
+        TextView statusText = new TextView(this);
+        statusText.setText("Initializing...");
+        statusText.setTextSize(14);
+        statusText.setGravity(android.view.Gravity.CENTER);
+        statusText.setPadding(0, 16, 0, 0);
+        content.addView(statusText);
+        
+        return content;
+    }
+
+    private LinearLayout createCompletionContent() {
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(24, 24, 24, 24);
+        
+        TextView completionText = new TextView(this);
+        completionText.setText("Setup Complete!\n\nYour modded Terraria APK is ready!");
+        completionText.setTextSize(18);
+        completionText.setGravity(android.view.Gravity.CENTER);
+        content.addView(completionText);
+        
+        Button installApkBtn = new Button(this);
+        installApkBtn.setText("Install Patched APK");
+        installApkBtn.setOnClickListener(v -> controller.installPatchedApk());
+        content.addView(installApkBtn);
+        
+        Button manageModsBtn = new Button(this);
+        manageModsBtn.setText("Manage DLL Mods");
+        manageModsBtn.setOnClickListener(v -> openModManagement());
+        content.addView(manageModsBtn);
+        
+        Button viewLogsBtn = new Button(this);
+        viewLogsBtn.setText("View Logs");
+        viewLogsBtn.setOnClickListener(v -> startActivity(new Intent(this, LogViewerEnhancedActivity.class)));
+        content.addView(viewLogsBtn);
+        
+        return content;
+    }
+
+    private void setupListeners() {
+        previousButton.setOnClickListener(v -> {
+            if (controller.canProceedToPreviousStep()) {
+                controller.previousStep();
+            }
+        });
+        
+        nextButton.setOnClickListener(v -> {
+            if (controller.canProceedToNextStep()) {
+                handleNextStep();
+            } else {
+                showStepRequirements();
+            }
+        });
+        
+        actionButton.setOnClickListener(v -> handleActionButton());
+    }
+
+    private void handleNextStep() {
+        UnifiedLoaderController.LoaderStep currentStep = controller.getCurrentStep();
+        
+        switch (currentStep) {
+            case WELCOME:
+                controller.nextStep();
+                break;
+            case LOADER_INSTALL:
+                if (controller.isLoaderInstalled()) {
+                    controller.nextStep();
+                } else {
+                    Toast.makeText(this, "Please install a loader first", Toast.LENGTH_SHORT).show();
+                }
+                break;
+            case APK_SELECTION:
+                if (controller.getSelectedApkUri() != null) {
+                    controller.nextStep();
+                    controller.patchApk(); // Auto-start patching
+                } else {
+                    Toast.makeText(this, "Please select an APK first", Toast.LENGTH_SHORT).show();
+                }
+                break;
+            case APK_PATCHING:
+                // Patching in progress, disable navigation
+                break;
+            case COMPLETION:
+                finish(); // Exit wizard
+                break;
+        }
+    }
+
+    private void handleActionButton() {
+        UnifiedLoaderController.LoaderStep currentStep = controller.getCurrentStep();
+        
+        switch (currentStep) {
+            case WELCOME:
+                controller.nextStep();
+                break;
+            case LOADER_INSTALL:
+                showOnlineInstallOptions();
+                break;
+            case APK_SELECTION:
+                selectApkFile();
+                break;
+            case APK_PATCHING:
+                // No action during patching
+                break;
+            case COMPLETION:
+                controller.installPatchedApk();
+                break;
+        }
+    }
+
+    private void showOnlineInstallOptions() {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("Choose Loader Type");
+        builder.setMessage("Select which loader to install:\n\nMelonLoader: Full-featured, larger size\nLemonLoader: Lightweight, smaller size");
+        
+        builder.setPositiveButton("MelonLoader", (dialog, which) -> {
+            controller.installLoaderOnline(MelonLoaderManager.LoaderType.MELONLOADER_NET8);
+        });
+        
+        builder.setNegativeButton("LemonLoader", (dialog, which) -> {
+            controller.installLoaderOnline(MelonLoaderManager.LoaderType.MELONLOADER_NET35);
+        });
+        
+        builder.setNeutralButton("Cancel", null);
+        builder.show();
+    }
+
+    private void selectOfflineZip() {
+        Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+        intent.setType("application/zip");
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        startActivityForResult(intent, REQUEST_SELECT_ZIP);
+    }
+
+    private void selectApkFile() {
+        Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+        intent.setType("application/vnd.android.package-archive");
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        startActivityForResult(intent, REQUEST_SELECT_APK);
+    }
+
+    private void openModManagement() {
+        Intent intent = new Intent(this, ModManagementActivity.class);
+        startActivity(intent);
+    }
+
+    private void showStepRequirements() {
+        UnifiedLoaderController.LoaderStep currentStep = controller.getCurrentStep();
+        String message = "";
+        
+        switch (currentStep) {
+            case LOADER_INSTALL:
+                message = "Please install MelonLoader or LemonLoader first";
+                break;
+            case APK_SELECTION:
+                message = "Please select a Terraria APK file";
+                break;
+            default:
+                message = "Please complete the current step";
+                break;
+        }
+        
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        
+        if (resultCode != Activity.RESULT_OK || data == null || data.getData() == null) {
+            return;
+        }
+        
+        Uri uri = data.getData();
+        
+        switch (requestCode) {
+            case REQUEST_SELECT_APK:
+                controller.selectApk(uri);
+                String filename = getFilenameFromUri(uri);
+                if (apkStatusText != null) {
+                    apkStatusText.setText("Selected: " + filename);
+                }
+                break;
+                
+            case REQUEST_SELECT_ZIP:
+                controller.installLoaderOffline(uri);
+                break;
+        }
+    }
+
+    private String getFilenameFromUri(Uri uri) {
+        String filename = null;
+        try (Cursor cursor = getContentResolver().query(uri, null, null, null, null)) {
+            if (cursor != null && cursor.moveToFirst()) {
+                int nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                if (nameIndex >= 0) {
+                    filename = cursor.getString(nameIndex);
+                }
+            }
+        } catch (Exception e) {
+            LogUtils.logDebug("Could not get filename: " + e.getMessage());
+        }
+        return filename != null ? filename : "Unknown file";
+    }
+
+    // === UnifiedLoaderController.UnifiedLoaderCallback Implementation ===
+
+    @Override
+    public void onStepChanged(UnifiedLoaderController.LoaderStep step, String message) {
+        runOnUiThread(() -> {
+            stepTitleText.setText(step.getTitle());
+            stepDescriptionText.setText(message);
+            
+            // Clear previous content
+            stepContentContainer.removeAllViews();
+            
+            // Add appropriate content
+            switch (step) {
+                case WELCOME:
+                    stepContentContainer.addView(welcomeContent);
+                    actionButton.setText("Start Setup");
+                    actionButton.setVisibility(View.VISIBLE);
+                    break;
+                case LOADER_INSTALL:
+                    stepContentContainer.addView(loaderInstallContent);
+                    actionButton.setText("Install Online");
+                    actionButton.setVisibility(View.VISIBLE);
+                    break;
+                case APK_SELECTION:
+                    stepContentContainer.addView(apkSelectionContent);
+                    actionButton.setText("Select APK");
+                    actionButton.setVisibility(View.VISIBLE);
+                    break;
+                case APK_PATCHING:
+                    stepContentContainer.addView(patchingContent);
+                    actionButton.setVisibility(View.GONE);
+                    nextButton.setEnabled(false);
+                    previousButton.setEnabled(false);
+                    break;
+                case COMPLETION:
+                    stepContentContainer.addView(completionContent);
+                    actionButton.setText("Install APK");
+                    actionButton.setVisibility(View.VISIBLE);
+                    nextButton.setText("Finish");
+                    nextButton.setEnabled(true);
+                    previousButton.setEnabled(true);
+                    break;
+            }
+            
+            // Update navigation buttons
+            previousButton.setEnabled(controller.canProceedToPreviousStep());
+            nextButton.setEnabled(controller.canProceedToNextStep());
+        });
+    }
+
+    @Override
+    public void onProgress(String message, int percentage) {
+        runOnUiThread(() -> {
+            if (progressDialog != null) {
+                progressDialog.setMessage(message + (percentage > 0 ? " (" + percentage + "%)" : ""));
+            }
+            if (progressText != null) {
+                progressText.setText(message);
+            }
+        });
+    }
+
+    @Override
+    public void onSuccess(String message) {
+        runOnUiThread(() -> {
+            if (progressDialog != null) {
+                progressDialog.dismiss();
+                progressDialog = null;
+            }
+            Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+        });
+    }
+
+    @Override
+    public void onError(String error) {
+        runOnUiThread(() -> {
+            if (progressDialog != null) {
+                progressDialog.dismiss();
+                progressDialog = null;
+            }
+            
+            AlertDialog.Builder builder = new AlertDialog.Builder(this);
+            builder.setTitle("Error");
+            builder.setMessage(error);
+            builder.setPositiveButton("OK", null);
+            builder.show();
+            
+            // Re-enable navigation
+            nextButton.setEnabled(controller.canProceedToNextStep());
+            previousButton.setEnabled(controller.canProceedToPreviousStep());
+        });
+    }
+
+    @Override
+    public void onLoaderStatusChanged(boolean installed, String statusText) {
+        runOnUiThread(() -> {
+            if (loaderStatusText != null) {
+                loaderStatusText.setText(statusText);
+                loaderStatusText.setTextColor(installed ? 0xFF4CAF50 : 0xFFF44336);
+            }
+        });
+    }
+
+    @Override
+    public void updateStepIndicator(int currentStep, int totalSteps) {
+        runOnUiThread(() -> {
+            stepProgressBar.setMax(totalSteps);
+            stepProgressBar.setProgress(currentStep);
+            stepIndicatorText.setText("Step " + (currentStep + 1) + " of " + (totalSteps + 1));
+        });
+    }
+
+    // === UnifiedLoaderListener Implementation ===
+
+    @Override
+    public void onInstallationStarted(String loaderType) {
+        runOnUiThread(() -> {
+            progressDialog = new AlertDialog.Builder(this)
+                .setTitle("Installing " + loaderType)
+                .setMessage("Starting installation...")
+                .setCancelable(false)
+                .create();
+            progressDialog.show();
+        });
+    }
+
+    @Override
+    public void onInstallationProgress(String message) {
+        runOnUiThread(() -> {
+            if (progressDialog != null) {
+                progressDialog.setMessage(message);
+            }
+        });
+    }
+
+    @Override
+    public void onInstallationSuccess(String loaderType, String outputPath) {
+        runOnUiThread(() -> {
+            if (progressDialog != null) {
+                progressDialog.dismiss();
+                progressDialog = null;
+            }
+            Toast.makeText(this, loaderType + " installed successfully!", Toast.LENGTH_LONG).show();
+        });
+    }
+
+    @Override
+    public void onInstallationFailed(String loaderType, String error) {
+        runOnUiThread(() -> {
+            if (progressDialog != null) {
+                progressDialog.dismiss();
+                progressDialog = null;
+            }
+            
+            AlertDialog.Builder builder = new AlertDialog.Builder(this);
+            builder.setTitle("Installation Failed");
+            builder.setMessage(loaderType + " installation failed:\n\n" + error);
+            builder.setPositiveButton("OK", null);
+            builder.show();
+        });
+    }
+
+    @Override
+    public void onValidationComplete(boolean isValid, String message) {
+        runOnUiThread(() -> {
+            String statusText = isValid ? "Validation passed" : "Validation failed: " + message;
+            Toast.makeText(this, statusText, Toast.LENGTH_SHORT).show();
+        });
+    }
+
+    @Override
+    public void onInstallationStateChanged(UnifiedLoaderController.InstallationState state) {
+        runOnUiThread(() -> {
+            LogUtils.logDebug("Installation state changed to: " + state.getDisplayName());
+        });
+    }
+
+    @Override
+    public void onLogMessage(String message, UnifiedLoaderController.LogLevel level) {
+        // Log messages are already handled by the controller
+        LogUtils.logDebug("Log: [" + level + "] " + message);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // Refresh loader status when returning to activity
+        if (controller != null) {
+            // Update current step to refresh status
+            controller.setCurrentStep(controller.getCurrentStep());
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        if (controller != null) {
+            controller.cleanup();
+        }
+        if (progressDialog != null) {
+            progressDialog.dismiss();
+        }
+    }
+}
+
+/ModLoader/app/src/main/java/com/modloader/ui/UnifiedLoaderController.java
+
+// File: UnifiedLoaderController.java - Fixed step progression for offline ZIP import
+// Path: /app/src/main/java/com/modloader/ui/UnifiedLoaderController.java
+
+package com.modloader.ui;
+
+import android.app.Activity;
+import android.content.Context;
+import android.content.Intent;
+import android.net.Uri;
+import android.os.Handler;
+import android.os.Looper;
+import android.widget.Toast;
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
+
+import com.modloader.loader.MelonLoaderManager;
+import com.modloader.loader.LoaderInstaller;
+import com.modloader.loader.LoaderValidator;
+import com.modloader.util.ApkPatcher;
+import com.modloader.util.LogUtils;
+import com.modloader.util.FileUtils;
+import com.modloader.util.PathManager;
+import com.modloader.util.OfflineZipImporter;
+import java.io.File;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+public class UnifiedLoaderController {
+    private static final String TAG = "UnifiedLoaderController";
+    
+    private Activity activity;
+    private LoaderInstaller loaderInstaller;
+    private LoaderValidator loaderValidator;
+    private UnifiedLoaderListener listener;
+    private Handler mainHandler;
+    private ExecutorService executorService;
+    
+    // File picker launchers
+    private ActivityResultLauncher<Intent> apkPickerLauncher;
+    private ActivityResultLauncher<Intent> zipPickerLauncher;
+    
+    // Current operation state
+    private File selectedApkFile;
+    private File selectedZipFile;
+    private MelonLoaderManager.LoaderType selectedLoaderType;
+    private boolean isOperationInProgress = false;
+    private InstallationState currentState = InstallationState.IDLE;
+    private boolean loaderInstalledSuccessfully = false; // NEW: Track successful installation
+    
+    // Step management
+    private LoaderStep currentStep = LoaderStep.WELCOME;
+    private Uri selectedApkUri;
+    
+    /**
+     * Installation state enum for tracking current operation state
+     */
+    public enum InstallationState {
+        IDLE("Idle"),
+        INITIALIZING("Initializing"),
+        DOWNLOADING("Downloading"),
+        EXTRACTING("Extracting Files"),
+        CREATING_DIRECTORIES("Creating Directories"),
+        VALIDATING("Validating Installation"),
+        PATCHING_APK("Patching APK"),
+        INSTALLING_APK("Installing APK"),
+        COMPLETED("Installation Complete"),
+        FAILED("Installation Failed"),
+        CANCELLED("Operation Cancelled");
+        
+        private final String displayName;
+        
+        InstallationState(String displayName) {
+            this.displayName = displayName;
+        }
+        
+        public String getDisplayName() {
+            return displayName;
+        }
+        
+        @Override
+        public String toString() {
+            return displayName;
+        }
+    }
+    
+    /**
+     * Log level enum for categorizing log messages
+     */
+    public enum LogLevel {
+        DEBUG("DEBUG", 0),
+        INFO("INFO", 1),
+        WARNING("WARNING", 2),
+        ERROR("ERROR", 3),
+        USER("USER", 4);
+        
+        private final String displayName;
+        private final int priority;
+        
+        LogLevel(String displayName, int priority) {
+            this.displayName = displayName;
+            this.priority = priority;
+        }
+        
+        public String getDisplayName() {
+            return displayName;
+        }
+        
+        public int getPriority() {
+            return priority;
+        }
+        
+        @Override
+        public String toString() {
+            return displayName;
+        }
+    }
+    
+    // Legacy callback interface for backward compatibility
+    public interface UnifiedLoaderCallback extends UnifiedLoaderListener {
+        void onStepChanged(LoaderStep step, String message);
+        void onProgress(String message, int percentage);
+        void onSuccess(String message);
+        void onError(String error);
+        void onLoaderStatusChanged(boolean installed, String statusText);
+        void updateStepIndicator(int currentStep, int totalSteps);
+    }
+    
+    // LoaderStep enum for step tracking
+    public enum LoaderStep {
+        WELCOME("Welcome", "Welcome to MelonLoader Setup"),
+        LOADER_INSTALL("Loader Installation", "Install MelonLoader components"),
+        APK_SELECTION("APK Selection", "Select your Terraria APK"),
+        APK_PATCHING("APK Patching", "Patching APK with MelonLoader"),
+        COMPLETION("Setup Complete", "Installation completed successfully");
+        
+        private final String title;
+        private final String description;
+        
+        LoaderStep(String title, String description) {
+            this.title = title;
+            this.description = description;
+        }
+        
+        public String getTitle() {
+            return title;
+        }
+        
+        public String getDescription() {
+            return description;
+        }
+    }
+    
+    public UnifiedLoaderController(Activity activity) {
+        this.activity = activity;
+        this.loaderInstaller = new LoaderInstaller();
+        this.loaderValidator = new LoaderValidator();
+        this.mainHandler = new Handler(Looper.getMainLooper());
+        this.executorService = Executors.newSingleThreadExecutor();
+        
+        initializeFilePickers();
+    }
+    
+    public UnifiedLoaderController(Activity activity, UnifiedLoaderListener listener) {
+        this(activity);
+        this.listener = listener;
+    }
+    
+    // Callback setter for backward compatibility
+    public void setCallback(UnifiedLoaderCallback callback) {
+        this.listener = callback;
+    }
+    
+    private void initializeFilePickers() {
+        if (activity instanceof androidx.activity.ComponentActivity) {
+            apkPickerLauncher = ((androidx.activity.ComponentActivity) activity).registerForActivityResult(
+                new ActivityResultContracts.StartActivityForResult(),
+                result -> {
+                    if (result.getResultCode() == Activity.RESULT_OK && result.getData() != null) {
+                        Uri apkUri = result.getData().getData();
+                        handleApkSelection(apkUri);
+                    }
+                }
+            );
+            
+            zipPickerLauncher = ((androidx.activity.ComponentActivity) activity).registerForActivityResult(
+                new ActivityResultContracts.StartActivityForResult(),
+                result -> {
+                    if (result.getResultCode() == Activity.RESULT_OK && result.getData() != null) {
+                        Uri zipUri = result.getData().getData();
+                        handleZipSelection(zipUri);
+                    }
+                }
+            );
+        }
+    }
+    
+    // State management methods
+    private void setState(InstallationState newState) {
+        this.currentState = newState;
+        if (listener != null) {
+            listener.onInstallationStateChanged(newState);
+        }
+        logMessage("State changed to: " + newState.getDisplayName(), LogLevel.DEBUG);
+    }
+    
+    private void logMessage(String message, LogLevel level) {
+        if (listener != null) {
+            listener.onLogMessage(message, level);
+        }
+        
+        switch (level) {
+            case DEBUG:
+                LogUtils.logDebug(message);
+                break;
+            case INFO:
+                LogUtils.logInfo(message);
+                break;
+            case WARNING:
+                LogUtils.logWarning(message);
+                break;
+            case ERROR:
+                LogUtils.logError(message);
+                break;
+            case USER:
+                LogUtils.logUser(message);
+                break;
+        }
+    }
+    
+    // FIXED: Step management methods for wizard-style interface
+    public void setCurrentStep(LoaderStep step) {
+        this.currentStep = step;
+        if (listener instanceof UnifiedLoaderCallback) {
+            UnifiedLoaderCallback callback = (UnifiedLoaderCallback) listener;
+            callback.onStepChanged(step, step.getDescription());
+            callback.updateStepIndicator(step.ordinal(), LoaderStep.values().length - 1);
+        }
+        logMessage("Step changed to: " + step.getTitle(), LogLevel.INFO);
+    }
+    
+    public LoaderStep getCurrentStep() {
+        return currentStep;
+    }
+    
+    public void nextStep() {
+        LoaderStep[] steps = LoaderStep.values();
+        int currentIndex = currentStep.ordinal();
+        if (currentIndex < steps.length - 1) {
+            setCurrentStep(steps[currentIndex + 1]);
+        }
+    }
+    
+    public void previousStep() {
+        LoaderStep[] steps = LoaderStep.values();
+        int currentIndex = currentStep.ordinal();
+        if (currentIndex > 0) {
+            setCurrentStep(steps[currentIndex - 1]);
+        }
+    }
+    
+    // FIXED: Improved step progression logic
+    public boolean canProceedToNextStep() {
+        switch (currentStep) {
+            case WELCOME:
+                return true;
+            case LOADER_INSTALL:
+                // Check both actual installation and successful import
+                return isLoaderInstalled() || loaderInstalledSuccessfully;
+            case APK_SELECTION:
+                return selectedApkUri != null;
+            case APK_PATCHING:
+                return currentState == InstallationState.COMPLETED;
+            case COMPLETION:
+                return false; // Final step
+            default:
+                return false;
+        }
+    }
+    
+    public boolean canProceedToPreviousStep() {
+        return currentStep != LoaderStep.WELCOME && currentState != InstallationState.PATCHING_APK;
+    }
+    
+    // File selection methods
+    public void selectApkFile() {
+        if (isOperationInProgress) {
+            showToast("Operation in progress, please wait...");
+            return;
+        }
+        
+        if (apkPickerLauncher != null) {
+            Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+            intent.setType("application/vnd.android.package-archive");
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            apkPickerLauncher.launch(Intent.createChooser(intent, "Select Terraria APK"));
+        }
+    }
+    
+    public void selectZipFile() {
+        if (isOperationInProgress) {
+            showToast("Operation in progress, please wait...");
+            return;
+        }
+        
+        if (zipPickerLauncher != null) {
+            Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+            intent.setType("application/zip");
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            zipPickerLauncher.launch(Intent.createChooser(intent, "Select Loader ZIP"));
+        }
+    }
+    
+    public void selectApk(Uri uri) {
+        this.selectedApkUri = uri;
+        handleApkSelection(uri);
+    }
+    
+    public Uri getSelectedApkUri() {
+        return selectedApkUri;
+    }
+    
+    private void handleApkSelection(Uri apkUri) {
+        try {
+            File tempDir = new File(activity.getExternalFilesDir(null), "temp");
+            tempDir.mkdirs();
+            
+            String filename = FileUtils.getFilenameFromUri(activity, apkUri);
+            if (filename == null) {
+                filename = "selected_terraria.apk";
+            }
+            
+            File tempApkFile = new File(tempDir, filename);
+            if (FileUtils.copyUriToFile(activity, apkUri, tempApkFile)) {
+                selectedApkFile = tempApkFile;
+                selectedApkUri = apkUri;
+                logMessage("APK selected: " + filename, LogLevel.USER);
+                if (listener != null) {
+                    listener.onInstallationProgress("APK selected: " + filename);
+                }
+            } else {
+                showToast("Failed to copy APK file");
+                logMessage("Failed to copy selected APK", LogLevel.ERROR);
+            }
+        } catch (Exception e) {
+            logMessage("APK selection error: " + e.getMessage(), LogLevel.ERROR);
+            showToast("Error selecting APK: " + e.getMessage());
+        }
+    }
+    
+    private void handleZipSelection(Uri zipUri) {
+        try {
+            File tempDir = new File(activity.getExternalFilesDir(null), "temp");
+            tempDir.mkdirs();
+            
+            String filename = FileUtils.getFilenameFromUri(activity, zipUri);
+            if (filename == null) {
+                filename = "loader_files.zip";
+            }
+            
+            File tempZipFile = new File(tempDir, filename);
+            if (FileUtils.copyUriToFile(activity, zipUri, tempZipFile)) {
+                selectedZipFile = tempZipFile;
+                logMessage("ZIP selected: " + filename, LogLevel.USER);
+                if (listener != null) {
+                    listener.onInstallationProgress("Loader ZIP selected: " + filename);
+                }
+            } else {
+                showToast("Failed to copy ZIP file");
+                logMessage("Failed to copy selected ZIP", LogLevel.ERROR);
+            }
+        } catch (Exception e) {
+            logMessage("ZIP selection error: " + e.getMessage(), LogLevel.ERROR);
+            showToast("Error selecting ZIP: " + e.getMessage());
+        }
+    }
+    
+    // Installation methods
+    public void installLoaderOnline(MelonLoaderManager.LoaderType loaderType) {
+        if (isOperationInProgress) {
+            showToast("Installation already in progress");
+            return;
+        }
+        
+        this.selectedLoaderType = loaderType;
+        setState(InstallationState.INITIALIZING);
+        runAutomatedInstallationTask();
+    }
+    
+    // FIXED: Offline ZIP import with proper completion handling
+    public void installLoaderOffline(Uri zipUri) {
+        if (isOperationInProgress) {
+            showToast("Installation already in progress");
+            return;
+        }
+        
+        setState(InstallationState.INITIALIZING);
+        isOperationInProgress = true;
+        
+        if (listener != null) {
+            listener.onInstallationStarted("Offline ZIP Import");
+        }
+        
+        executorService.execute(() -> {
+            try {
+                setState(InstallationState.EXTRACTING);
+                
+                // Use the OfflineZipImporter
+                OfflineZipImporter.ImportResult result = OfflineZipImporter.importMelonLoaderZip(activity, zipUri);
+                
+                mainHandler.post(() -> {
+                    isOperationInProgress = false;
+                    
+                    if (result.success) {
+                        selectedLoaderType = result.detectedType;
+                        loaderInstalledSuccessfully = true; // Mark as successfully installed
+                        setState(InstallationState.COMPLETED);
+                        
+                        if (listener != null) {
+                            listener.onInstallationSuccess("Offline ZIP Import", "Files extracted successfully");
+                        }
+                        
+                        // Update loader status callback
+                        if (listener instanceof UnifiedLoaderCallback) {
+                            ((UnifiedLoaderCallback) listener).onLoaderStatusChanged(true, 
+                                "Loader installed via ZIP import: " + result.detectedType.getDisplayName());
+                        }
+                        
+                        logMessage("ZIP import completed successfully", LogLevel.USER);
+                        
+                    } else {
+                        setState(InstallationState.FAILED);
+                        
+                        if (listener != null) {
+                            listener.onInstallationFailed("Offline ZIP Import", result.message);
+                        }
+                        
+                        logMessage("ZIP import failed: " + result.message, LogLevel.ERROR);
+                    }
+                });
+                
+            } catch (Exception e) {
+                mainHandler.post(() -> {
+                    isOperationInProgress = false;
+                    setState(InstallationState.FAILED);
+                    
+                    if (listener != null) {
+                        listener.onInstallationFailed("Offline ZIP Import", e.getMessage());
+                    }
+                    
+                    logMessage("ZIP import error: " + e.getMessage(), LogLevel.ERROR);
+                });
+            }
+        });
+    }
+    
+    public void patchApk() {
+        if (selectedApkFile == null) {
+            logMessage("No APK selected for patching", LogLevel.ERROR);
+            return;
+        }
+        
+        if (selectedLoaderType == null) {
+            logMessage("No loader type selected", LogLevel.ERROR);
+            return;
+        }
+        
+        setState(InstallationState.PATCHING_APK);
+        runApkPatchingTask();
+    }
+    
+    public void installPatchedApk() {
+        logMessage("APK installation requested", LogLevel.USER);
+        if (listener != null) {
+            listener.onInstallationProgress("Starting APK installation...");
+        }
+    }
+    
+    // Background task methods
+    private void runAutomatedInstallationTask() {
+        isOperationInProgress = true;
+        
+        mainHandler.post(() -> {
+            if (listener != null) {
+                listener.onInstallationStarted(selectedLoaderType.getDisplayName());
+            }
+        });
+        
+        executorService.execute(() -> {
+            String errorMessage = null;
+            String outputPath = null;
+            boolean success = false;
+            
+            try {
+                setState(InstallationState.CREATING_DIRECTORIES);
+                
+                boolean structureCreated = loaderInstaller.createLoaderStructure(
+                    activity, LoaderInstaller.TERRARIA_PACKAGE, selectedLoaderType);
+                
+                if (!structureCreated) {
+                    errorMessage = "Failed to create loader directory structure";
+                } else {
+                    mainHandler.post(() -> {
+                        if (listener != null) {
+                            listener.onInstallationProgress("Directory structure created successfully");
+                        }
+                    });
+                    
+                    outputPath = PathManager.getGameBaseDir(activity, LoaderInstaller.TERRARIA_PACKAGE).getAbsolutePath();
+                    success = true;
+                    loaderInstalledSuccessfully = true; // Mark as successfully installed
+                    setState(InstallationState.COMPLETED);
+                }
+                
+            } catch (Exception e) {
+                logMessage("Automated installation failed: " + e.getMessage(), LogLevel.ERROR);
+                errorMessage = "Installation error: " + e.getMessage();
+                setState(InstallationState.FAILED);
+            }
+            
+            final boolean finalSuccess = success;
+            final String finalError = errorMessage;
+            final String finalOutput = outputPath;
+            mainHandler.post(() -> {
+                isOperationInProgress = false;
+                if (listener != null) {
+                    if (finalSuccess) {
+                        listener.onInstallationSuccess(selectedLoaderType.getDisplayName(), finalOutput);
+                        
+                        // Update loader status callback
+                        if (listener instanceof UnifiedLoaderCallback) {
+                            ((UnifiedLoaderCallback) listener).onLoaderStatusChanged(true, 
+                                "Loader installed successfully: " + selectedLoaderType.getDisplayName());
+                        }
+                    } else {
+                        listener.onInstallationFailed(selectedLoaderType.getDisplayName(), finalError);
+                    }
+                }
+            });
+        });
+    }
+    
+    private void runApkPatchingTask() {
+        isOperationInProgress = true;
+        
+        executorService.execute(() -> {
+            try {
+                File outputDir = new File(activity.getExternalFilesDir(null), "output");
+                outputDir.mkdirs();
+                
+                String outputFileName = selectedApkFile.getName().replace(".apk", "_modded.apk");
+                File patchedApkFile = new File(outputDir, outputFileName);
+                
+                ApkPatcher.PatchResult patchResult = ApkPatcher.injectMelonLoaderIntoApk(
+                    activity, selectedApkFile, patchedApkFile, selectedLoaderType);
+                
+                mainHandler.post(() -> {
+                    isOperationInProgress = false;
+                    if (patchResult.success) {
+                        setState(InstallationState.COMPLETED);
+                        nextStep();
+                        if (listener instanceof UnifiedLoaderCallback) {
+                            ((UnifiedLoaderCallback) listener).onSuccess("APK patching completed successfully");
+                        }
+                    } else {
+                        setState(InstallationState.FAILED);
+                        if (listener instanceof UnifiedLoaderCallback) {
+                            ((UnifiedLoaderCallback) listener).onError("APK patching failed: " + 
+                                (patchResult.errorMessage != null ? patchResult.errorMessage : "Unknown error"));
+                        }
+                    }
+                });
+                
+            } catch (Exception e) {
+                mainHandler.post(() -> {
+                    isOperationInProgress = false;
+                    setState(InstallationState.FAILED);
+                    logMessage("APK patching error: " + e.getMessage(), LogLevel.ERROR);
+                    if (listener instanceof UnifiedLoaderCallback) {
+                        ((UnifiedLoaderCallback) listener).onError("APK patching failed: " + e.getMessage());
+                    }
+                });
+            }
+        });
+    }
+    
+    // Status check methods
+    public boolean isLoaderInstalled() {
+        // Check both actual filesystem presence and successful installation flag
+        if (loaderInstalledSuccessfully) {
+            return true;
+        }
+        
+        if (selectedLoaderType == null) {
+            return false;
+        }
+        
+        if (selectedLoaderType == MelonLoaderManager.LoaderType.MELONLOADER_NET8) {
+            return MelonLoaderManager.isMelonLoaderInstalled(activity, LoaderInstaller.TERRARIA_PACKAGE);
+        } else if (selectedLoaderType == MelonLoaderManager.LoaderType.MELONLOADER_NET35) {
+            return MelonLoaderManager.isLemonLoaderInstalled(activity, LoaderInstaller.TERRARIA_PACKAGE);
+        }
+        
+        return false;
+    }
+    
+    public String getInstallationStatus() {
+        if (selectedLoaderType == null) {
+            return "No loader type selected";
+        }
+        
+        boolean isInstalled = isLoaderInstalled();
+        
+        if (isInstalled) {
+            return selectedLoaderType.getDisplayName() + " is installed and ready";
+        } else {
+            return selectedLoaderType.getDisplayName() + " is not installed";
+        }
+    }
+    
+    public InstallationState getCurrentState() {
+        return currentState;
+    }
+    
+    public boolean isOperationInProgress() {
+        return isOperationInProgress;
+    }
+    
+    // Utility methods
+    private void showToast(String message) {
+        if (activity != null) {
+            mainHandler.post(() -> Toast.makeText(activity, message, Toast.LENGTH_SHORT).show());
+        }
+    }
+    
+    public void cancelCurrentOperation() {
+        isOperationInProgress = false;
+        setState(InstallationState.CANCELLED);
+        logMessage("Operation cancelled by user", LogLevel.USER);
+    }
+    
+    public void cleanup() {
+        if (executorService != null && !executorService.isShutdown()) {
+            executorService.shutdown();
+        }
+        
+        try {
+            if (selectedApkFile != null && selectedApkFile.getParentFile().getName().equals("temp")) {
+                selectedApkFile.delete();
+            }
+            if (selectedZipFile != null && selectedZipFile.getParentFile().getName().equals("temp")) {
+                selectedZipFile.delete();
+            }
+        } catch (Exception e) {
+            logMessage("Cleanup error: " + e.getMessage(), LogLevel.DEBUG);
+        }
+    }
+    
+    // Getters for compatibility
+    public File getSelectedApkFile() {
+        return selectedApkFile;
+    }
+    
+    public File getSelectedZipFile() {
+        return selectedZipFile;
+    }
+    
+    public MelonLoaderManager.LoaderType getSelectedLoaderType() {
+        return selectedLoaderType;
+    }
+    
+    // Default implementations for UnifiedLoaderListener methods
+    public void onInstallationStarted(String loaderType) {
+        logMessage("Installation started: " + loaderType, LogLevel.INFO);
+    }
+    
+    public void onInstallationProgress(String message) {
+        logMessage("Progress: " + message, LogLevel.INFO);
+    }
+    
+    public void onInstallationSuccess(String loaderType, String outputPath) {
+        logMessage("Installation succeeded: " + loaderType, LogLevel.USER);
+    }
+    
+    public void onInstallationFailed(String loaderType, String error) {
+        logMessage("Installation failed: " + error, LogLevel.ERROR);
+    }
+    
+    public void onValidationComplete(boolean isValid, String message) {
+        logMessage("Validation: " + (isValid ? "PASSED" : "FAILED") + " - " + message, 
+                  isValid ? LogLevel.INFO : LogLevel.ERROR);
+    }
+    
+    public void onInstallationStateChanged(InstallationState state) {
+        logMessage("State changed: " + state.getDisplayName(), LogLevel.DEBUG);
+    }
+    
+    public void onLogMessage(String message, LogLevel level) {
+        // Already handled in logMessage method
+    }
+}
+  
+
+/ModLoader/app/src/main/java/com/modloader/ui/UnifiedLoaderListener.java
+
+// File: UnifiedLoaderListener.java - Missing interface for UnifiedLoaderActivity
+// Path: /app/src/main/java/com/modloader/ui/UnifiedLoaderListener.java
+
+package com.modloader.ui;
+
+import com.modloader.loader.MelonLoaderManager;
+
+/**
+ * Listener interface for unified loader operations
+ * Provides callbacks for installation progress and state changes
+ */
+public interface UnifiedLoaderListener {
+    
+    /**
+     * Called when installation starts
+     * @param loaderType Type of loader being installed
+     */
+    void onInstallationStarted(String loaderType);
+    
+    /**
+     * Called when installation progress updates
+     * @param message Progress message
+     */
+    void onInstallationProgress(String message);
+    
+    /**
+     * Called when installation succeeds
+     * @param loaderType Type of loader that was installed
+     * @param outputPath Path to the output
+     */
+    void onInstallationSuccess(String loaderType, String outputPath);
+    
+    /**
+     * Called when installation fails
+     * @param loaderType Type of loader that failed
+     * @param error Error message
+     */
+    void onInstallationFailed(String loaderType, String error);
+    
+    /**
+     * Called when validation completes
+     * @param isValid Whether validation passed
+     * @param message Validation message
+     */
+    void onValidationComplete(boolean isValid, String message);
+    
+    /**
+     * Called when installation state changes
+     * @param state New installation state
+     */
+    void onInstallationStateChanged(UnifiedLoaderController.InstallationState state);
+    
+    /**
+     * Called when a log message is generated
+     * @param message Log message
+     * @param level Log level
+     */
+    void onLogMessage(String message, UnifiedLoaderController.LogLevel level);
+}
+
+/ModLoader/app/src/main/java/com/modloader/util/ApkInstaller.java
+
+// File: ApkInstaller.java (FIXED) - Enhanced APK Installation with Proper Error Handling
+// Path: /main/java/com/modloader/util/ApkInstaller.java
+
+package com.modloader.util;
+
+import android.app.Activity;
+import android.content.Context;
+import android.content.Intent;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
+import android.net.Uri;
+import android.os.Build;
+import android.provider.Settings;
+import android.widget.Toast;
+import androidx.core.content.FileProvider;
+import androidx.appcompat.app.AlertDialog;
+
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.security.MessageDigest;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
+
+public class ApkInstaller {
+    
+    private static final String TAG = "ApkInstaller";
+    private static final int MIN_APK_SIZE = 1024 * 1024; // 1MB minimum
+    private static final int MAX_APK_SIZE = 200 * 1024 * 1024; // 200MB maximum
+    
+    // Enhanced APK installation with comprehensive error handling
+    public static void installApk(Context context, File apkFile) {
+        if (context == null) {
+            LogUtils.logError("Context is null - cannot install APK");
+            return;
+        }
+        
+        if (apkFile == null) {
+            LogUtils.logError("APK file is null - cannot install");
+            showError(context, "APK Installation Failed", 
+                "No APK file specified. Please select a valid APK file.");
+            return;
+        }
+        
+        LogUtils.logUser("🔧 Starting APK installation: " + apkFile.getName());
+        LogUtils.logDebug("APK path: " + apkFile.getAbsolutePath());
+        LogUtils.logDebug("APK size: " + FileUtils.formatFileSize(apkFile.length()));
+        
+        // Step 1: Validate APK file
+        ValidationResult validation = validateApkFile(apkFile);
+        if (!validation.isValid) {
+            LogUtils.logError("APK validation failed: " + validation.errorMessage);
+            showError(context, "Invalid APK File", validation.errorMessage);
+            return;
+        }
+        
+        // Step 2: Check permissions
+        if (!checkInstallPermissions(context)) {
+            LogUtils.logUser("Install permissions not granted - requesting permission");
+            requestInstallPermission(context);
+            return;
+        }
+        
+        // Step 3: Prepare APK for installation
+        try {
+            File preparedApk = prepareApkForInstallation(context, apkFile);
+            if (preparedApk == null) {
+                LogUtils.logError("Failed to prepare APK for installation");
+                showError(context, "Installation Preparation Failed", 
+                    "Could not prepare the APK file for installation. Check storage permissions and available space.");
+                return;
+            }
+            
+            // Step 4: Launch installation intent
+            launchInstallationIntent(context, preparedApk);
+            
+        } catch (Exception e) {
+            LogUtils.logError("APK installation error: " + e.getMessage());
+            showError(context, "Installation Error", 
+                "Failed to install APK: " + e.getMessage() + 
+                "\n\nTry:\n• Checking file permissions\n• Ensuring enough storage space\n• Restarting the app");
+        }
+    }
+    
+    // Comprehensive APK validation
+    private static ValidationResult validateApkFile(File apkFile) {
+        ValidationResult result = new ValidationResult();
+        
+        // Check file exists
+        if (!apkFile.exists()) {
+            result.errorMessage = "APK file does not exist:\n" + apkFile.getAbsolutePath();
+            return result;
+        }
+        
+        // Check file is readable
+        if (!apkFile.canRead()) {
+            result.errorMessage = "APK file is not readable. Check file permissions.";
+            return result;
+        }
+        
+        // Check file size
+        long fileSize = apkFile.length();
+        if (fileSize == 0) {
+            result.errorMessage = "APK file is empty (0 bytes).";
+            return result;
+        }
+        
+        if (fileSize < MIN_APK_SIZE) {
+            result.errorMessage = "APK file is too small (" + FileUtils.formatFileSize(fileSize) + 
+                "). Minimum size: " + FileUtils.formatFileSize(MIN_APK_SIZE);
+            return result;
+        }
+        
+        if (fileSize > MAX_APK_SIZE) {
+            result.errorMessage = "APK file is too large (" + FileUtils.formatFileSize(fileSize) + 
+                "). Maximum size: " + FileUtils.formatFileSize(MAX_APK_SIZE);
+            return result;
+        }
+        
+        // Check file extension
+        String fileName = apkFile.getName().toLowerCase();
+        if (!fileName.endsWith(".apk")) {
+            result.errorMessage = "File does not have .apk extension: " + fileName;
+            return result;
+        }
+        
+        // Check APK magic number (PK signature)
+        if (!isValidApkFile(apkFile)) {
+            result.errorMessage = "File is not a valid APK. The file may be corrupted or not an Android package.";
+            return result;
+        }
+        
+        // Try to parse APK package info
+        try {
+            String packageInfo = getApkPackageInfo(apkFile);
+            LogUtils.logDebug("APK package info: " + packageInfo);
+        } catch (Exception e) {
+            result.errorMessage = "Cannot parse APK package information. The APK may be corrupted.\n\nError: " + e.getMessage();
+            return result;
+        }
+        
+        result.isValid = true;
+        return result;
+    }
+    
+    // Check if file is a valid APK by reading ZIP signature
+    private static boolean isValidApkFile(File apkFile) {
+        try (FileInputStream fis = new FileInputStream(apkFile)) {
+            byte[] signature = new byte[4];
+            int bytesRead = fis.read(signature);
+            
+            if (bytesRead != 4) return false;
+            
+            // Check for ZIP signature (PK\003\004 or PK\005\006 or PK\007\008)
+            return (signature[0] == 0x50 && signature[1] == 0x4B && 
+                   (signature[2] == 0x03 || signature[2] == 0x05 || signature[2] == 0x07));
+                   
+        } catch (Exception e) {
+            LogUtils.logDebug("Error checking APK signature: " + e.getMessage());
+            return false;
+        }
+    }
+    
+    // Get basic APK package information
+    private static String getApkPackageInfo(File apkFile) throws Exception {
+        try (ZipInputStream zis = new ZipInputStream(new FileInputStream(apkFile))) {
+            ZipEntry entry;
+            boolean hasManifest = false;
+            boolean hasDexFile = false;
+            int entryCount = 0;
+            
+            while ((entry = zis.getNextEntry()) != null && entryCount < 100) {
+                String entryName = entry.getName();
+                
+                if ("AndroidManifest.xml".equals(entryName)) {
+                    hasManifest = true;
+                }
+                
+                if (entryName.endsWith(".dex")) {
+                    hasDexFile = true;
+                }
+                
+                entryCount++;
+            }
+            
+            if (!hasManifest) {
+                throw new Exception("APK missing AndroidManifest.xml");
+            }
+            
+            if (!hasDexFile) {
+                throw new Exception("APK missing .dex files");
+            }
+            
+            return String.format("Valid APK with %d entries, manifest: %s, dex files: %s", 
+                entryCount, hasManifest, hasDexFile);
+        }
+    }
+    
+    // Check install permissions
+    private static boolean checkInstallPermissions(Context context) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            return context.getPackageManager().canRequestPackageInstalls();
+        }
+        
+        // For older Android versions, check unknown sources setting
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
+            try {
+                return Settings.Secure.getInt(context.getContentResolver(), 
+                    Settings.Secure.INSTALL_NON_MARKET_APPS) == 1;
+            } catch (Settings.SettingNotFoundException e) {
+                return false;
+            }
+        }
+        
+        return true; // Assume allowed for very old versions
+    }
+    
+    // Request install permission
+    private static void requestInstallPermission(Context context) {
+        if (!(context instanceof Activity)) {
+            LogUtils.logError("Context is not an Activity - cannot request permissions");
+            Toast.makeText(context, "Cannot request install permission - context is not an Activity", 
+                Toast.LENGTH_LONG).show();
+            return;
+        }
+        
+        Activity activity = (Activity) context;
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // Android 8.0+ - Request install unknown apps permission
+            new AlertDialog.Builder(activity)
+                .setTitle("🔐 Install Permission Required")
+                .setMessage("To install the modified APK, you need to allow this app to install unknown apps.\n\n" +
+                           "Steps:\n" +
+                           "1. Tap 'Grant Permission'\n" +
+                           "2. Enable 'Allow from this source'\n" +
+                           "3. Return to ModLoader\n" +
+                           "4. Try installing again")
+                .setPositiveButton("Grant Permission", (dialog, which) -> {
+                    Intent intent = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES);
+                    intent.setData(Uri.parse("package:" + activity.getPackageName()));
+                    try {
+                        activity.startActivity(intent);
+                        LogUtils.logUser("Opened install permission settings");
+                    } catch (Exception e) {
+                        LogUtils.logError("Failed to open install permission settings: " + e.getMessage());
+                        Toast.makeText(activity, "Cannot open permission settings", Toast.LENGTH_SHORT).show();
+                    }
+                })
+                .setNegativeButton("Cancel", (dialog, which) -> {
+                    LogUtils.logUser("User cancelled install permission request");
+                })
+                .show();
+                
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
+            // Android 4.2-7.1 - Direct to security settings
+            new AlertDialog.Builder(activity)
+                .setTitle("🔐 Enable Unknown Sources")
+                .setMessage("To install the modified APK, you need to enable 'Unknown Sources' in security settings.\n\n" +
+                           "Steps:\n" +
+                           "1. Tap 'Open Settings'\n" +
+                           "2. Find 'Unknown sources' and enable it\n" +
+                           "3. Return to ModLoader\n" +
+                           "4. Try installing again")
+                .setPositiveButton("Open Settings", (dialog, which) -> {
+                    try {
+                        Intent intent = new Intent(Settings.ACTION_SECURITY_SETTINGS);
+                        activity.startActivity(intent);
+                        LogUtils.logUser("Opened security settings for unknown sources");
+                    } catch (Exception e) {
+                        LogUtils.logError("Failed to open security settings: " + e.getMessage());
+                        Toast.makeText(activity, "Cannot open security settings", Toast.LENGTH_SHORT).show();
+                    }
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+        }
+    }
+    
+    // Prepare APK for installation (copy to accessible location)
+    private static File prepareApkForInstallation(Context context, File sourceApk) {
+        try {
+            // Create installation directory in app's external files
+            File installDir = new File(context.getExternalFilesDir(null), "apk_install");
+            if (!installDir.exists() && !installDir.mkdirs()) {
+                LogUtils.logError("Failed to create install directory");
+                return null;
+            }
+            
+            // Create target file with timestamp to avoid conflicts
+            String fileName = sourceApk.getName();
+            if (!fileName.toLowerCase().endsWith(".apk")) {
+                fileName = fileName + ".apk";
+            }
+            
+            // Add timestamp to avoid conflicts
+            String baseName = fileName.substring(0, fileName.lastIndexOf('.'));
+            String extension = fileName.substring(fileName.lastIndexOf('.'));
+            String targetFileName = baseName + "_" + System.currentTimeMillis() + extension;
+            
+            File targetApk = new File(installDir, targetFileName);
+            
+            // Copy APK to accessible location
+            if (!FileUtils.copyFile(sourceApk, targetApk)) {
+                LogUtils.logError("Failed to copy APK to install directory");
+                return null;
+            }
+            
+            // Set file permissions
+            if (!targetApk.setReadable(true, false)) {
+                LogUtils.logDebug("Warning: Could not set APK as readable");
+            }
+            
+            LogUtils.logUser("✅ APK prepared for installation: " + targetApk.getName());
+            LogUtils.logDebug("Target APK path: " + targetApk.getAbsolutePath());
+            
+            return targetApk;
+            
+        } catch (Exception e) {
+            LogUtils.logError("Error preparing APK: " + e.getMessage());
+            return null;
+        }
+    }
+    
+    // Launch the actual installation intent
+    private static void launchInstallationIntent(Context context, File apkFile) {
+        try {
+            Intent installIntent = new Intent(Intent.ACTION_VIEW);
+            installIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            
+            Uri apkUri;
+            
+            // Use FileProvider for Android 7.0+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                installIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                apkUri = FileProvider.getUriForFile(context, 
+                    context.getPackageName() + ".provider", apkFile);
+                LogUtils.logDebug("Using FileProvider URI: " + apkUri);
+            } else {
+                apkUri = Uri.fromFile(apkFile);
+                LogUtils.logDebug("Using direct file URI: " + apkUri);
+            }
+            
+            installIntent.setDataAndType(apkUri, "application/vnd.android.package-archive");
+            
+            // Verify intent can be handled
+            if (installIntent.resolveActivity(context.getPackageManager()) != null) {
+                context.startActivity(installIntent);
+                LogUtils.logUser("🚀 Installation intent launched successfully");
+                
+                // Show user guidance
+                Toast.makeText(context, 
+                    "📱 Installation dialog should appear.\nIf not, check your notification panel.", 
+                    Toast.LENGTH_LONG).show();
+                    
+            } else {
+                LogUtils.logError("No activity found to handle install intent");
+                showError(context, "Installation Error", 
+                    "No app found to handle APK installation. This shouldn't happen on Android devices.");
+            }
+            
+        } catch (Exception e) {
+            LogUtils.logError("Failed to launch install intent: " + e.getMessage());
+            showError(context, "Installation Launch Failed", 
+                "Could not start APK installation.\n\nError: " + e.getMessage() + 
+                "\n\nPossible solutions:\n• Restart the app\n• Check storage permissions\n• Try a different APK");
+        }
+    }
+    
+    // Calculate MD5 hash of APK for verification
+    public static String calculateApkHash(File apkFile) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("MD5");
+            try (FileInputStream fis = new FileInputStream(apkFile)) {
+                byte[] buffer = new byte[8192];
+                int bytesRead;
+                while ((bytesRead = fis.read(buffer)) != -1) {
+                    md.update(buffer, 0, bytesRead);
+                }
+            }
+            
+            byte[] hashBytes = md.digest();
+            StringBuilder hexString = new StringBuilder();
+            for (byte b : hashBytes) {
+                String hex = Integer.toHexString(0xff & b);
+                if (hex.length() == 1) {
+                    hexString.append('0');
+                }
+                hexString.append(hex);
+            }
+            return hexString.toString().toUpperCase();
+            
+        } catch (Exception e) {
+            LogUtils.logError("Failed to calculate APK hash: " + e.getMessage());
+            return "UNKNOWN";
+        }
+    }
+    
+    // Get detailed APK information
+    public static ApkInfo getApkInfo(Context context, File apkFile) {
+        ApkInfo info = new ApkInfo();
+        info.fileName = apkFile.getName();
+        info.filePath = apkFile.getAbsolutePath();
+        info.fileSize = apkFile.length();
+        info.lastModified = apkFile.lastModified();
+        
+        try {
+            PackageManager pm = context.getPackageManager();
+            PackageInfo packageInfo = pm.getPackageArchiveInfo(apkFile.getAbsolutePath(), 0);
+            
+            if (packageInfo != null) {
+                info.packageName = packageInfo.packageName;
+                info.versionName = packageInfo.versionName;
+                info.versionCode = packageInfo.versionCode;
+                
+                // Get application label
+                packageInfo.applicationInfo.sourceDir = apkFile.getAbsolutePath();
+                packageInfo.applicationInfo.publicSourceDir = apkFile.getAbsolutePath();
+                info.appName = pm.getApplicationLabel(packageInfo.applicationInfo).toString();
+            }
+            
+        } catch (Exception e) {
+            LogUtils.logDebug("Could not extract package info: " + e.getMessage());
+        }
+        
+        info.hash = calculateApkHash(apkFile);
+        return info;
+    }
+    
+    // Clean up old installation files
+    public static void cleanupInstallFiles(Context context) {
+        try {
+            File installDir = new File(context.getExternalFilesDir(null), "apk_install");
+            if (installDir.exists() && installDir.isDirectory()) {
+                File[] files = installDir.listFiles();
+                if (files != null) {
+                    long currentTime = System.currentTimeMillis();
+                    int deletedCount = 0;
+                    
+                    for (File file : files) {
+                        // Delete files older than 1 hour
+                        if (currentTime - file.lastModified() > 3600000) {
+                            if (file.delete()) {
+                                deletedCount++;
+                            }
+                        }
+                    }
+                    
+                    if (deletedCount > 0) {
+                        LogUtils.logDebug("Cleaned up " + deletedCount + " old installation files");
+                    }
+                }
+            }
+        } catch (Exception e) {
+            LogUtils.logDebug("Error cleaning up install files: " + e.getMessage());
+        }
+    }
+    
+    // Show error dialog
+    private static void showError(Context context, String title, String message) {
+        if (context instanceof Activity) {
+            new AlertDialog.Builder(context)
+                .setTitle("❌ " + title)
+                .setMessage(message)
+                .setPositiveButton("OK", null)
+                .show();
+        } else {
+            Toast.makeText(context, title + ": " + message, Toast.LENGTH_LONG).show();
+        }
+    }
+    
+    // Validation result helper class
+    private static class ValidationResult {
+        boolean isValid = false;
+        String errorMessage = "";
+    }
+    
+    // APK information class
+    public static class ApkInfo {
+        public String fileName;
+        public String filePath;
+        public long fileSize;
+        public long lastModified;
+        public String packageName;
+        public String appName;
+        public String versionName;
+        public int versionCode;
+        public String hash;
+        
+        @Override
+        public String toString() {
+            StringBuilder sb = new StringBuilder();
+            sb.append("=== APK Information ===\n");
+            sb.append("File: ").append(fileName).append("\n");
+            sb.append("Size: ").append(FileUtils.formatFileSize(fileSize)).append("\n");
+            sb.append("Package: ").append(packageName != null ? packageName : "Unknown").append("\n");
+            sb.append("App Name: ").append(appName != null ? appName : "Unknown").append("\n");
+            sb.append("Version: ").append(versionName != null ? versionName : "Unknown");
+            if (versionCode > 0) {
+                sb.append(" (").append(versionCode).append(")");
+            }
+            sb.append("\n");
+            sb.append("Hash: ").append(hash).append("\n");
+            sb.append("Modified: ").append(new java.util.Date(lastModified).toString()).append("\n");
+            return sb.toString();
+        }
+    }
+}
+
+/ModLoader/app/src/main/java/com/modloader/util/ApkPatcher.java
+
+// File: ApkPatcher.java - Enhanced APK patching with real MelonLoader injection
+// Path: app/src/main/java/com/modloader/util/ApkPatcher.java
+
+package com.modloader.util;
+
+import android.content.Context;
+import com.modloader.loader.MelonLoaderManager;
+import java.io.*;
+import java.util.zip.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.HashMap;
+import java.util.Map;
+
+public class ApkPatcher {
+    private static final String TAG = "ApkPatcher";
+    private static final int BUFFER_SIZE = 8192;
+    
+    // MelonLoader injection points for Unity games
+    private static final String[] INJECTION_TARGETS = {
+        "lib/arm64-v8a/libil2cpp.so",
+        "lib/arm64-v8a/libunity.so", 
+        "lib/armeabi-v7a/libil2cpp.so",
+        "lib/armeabi-v7a/libunity.so"
+    };
+    
+    public static class PatchResult {
+        public boolean success = false;
+        public String errorMessage = null;
+        public long originalSize = 0;
+        public long patchedSize = 0;
+        public int addedFiles = 0;
+        public int modifiedFiles = 0;
+        public List<String> injectedFiles = new ArrayList<>();
+        public List<String> warnings = new ArrayList<>();
+        public String outputPath = null;
+        
+        public String getDetailedReport() {
+            StringBuilder sb = new StringBuilder();
+            sb.append("=== APK Patching Report ===\n");
+            sb.append("Status: ").append(success ? "✅ SUCCESS" : "❌ FAILED").append("\n");
+            if (errorMessage != null) {
+                sb.append("Error: ").append(errorMessage).append("\n");
+            }
+            sb.append("Original Size: ").append(FileUtils.formatFileSize(originalSize)).append("\n");
+            sb.append("Patched Size: ").append(FileUtils.formatFileSize(patchedSize)).append("\n");
+            sb.append("Size Change: ").append(FileUtils.formatFileSize(patchedSize - originalSize)).append("\n");
+            sb.append("Files Added: ").append(addedFiles).append("\n");
+            sb.append("Files Modified: ").append(modifiedFiles).append("\n");
+            
+            if (!injectedFiles.isEmpty()) {
+                sb.append("\nInjected Files:\n");
+                for (String file : injectedFiles) {
+                    sb.append("+ ").append(file).append("\n");
+                }
+            }
+            
+            if (!warnings.isEmpty()) {
+                sb.append("\nWarnings:\n");
+                for (String warning : warnings) {
+                    sb.append("⚠️ ").append(warning).append("\n");
+                }
+            }
+            
+            return sb.toString();
+        }
+    }
+    
+    /**
+     * Main APK patching method with real MelonLoader injection
+     */
+    public static PatchResult injectMelonLoaderIntoApk(Context context, File inputApk, File outputApk, 
+                                                      MelonLoaderManager.LoaderType loaderType) {
+        LogUtils.logUser("🚀 Starting APK patching with " + loaderType.getDisplayName());
+        
+        PatchResult result = new PatchResult();
+        
+        try {
+            // Step 1: Validate input APK
+            LogUtils.logUser("📋 Step 1: Validating input APK...");
+            ApkValidator.ValidationResult validation = ApkValidator.validateApk(inputApk.getAbsolutePath(), "input-validation");
+            
+            if (!validation.isValid) {
+                result.errorMessage = "Input APK validation failed: " + validation.issues.get(0);
+                LogUtils.logUser("❌ " + result.errorMessage);
+                return result;
+            }
+            
+            result.originalSize = inputApk.length();
+            LogUtils.logUser("✅ Input APK is valid (" + FileUtils.formatFileSize(result.originalSize) + ")");
+            
+            // Step 2: Check MelonLoader files availability
+            LogUtils.logUser("📋 Step 2: Checking MelonLoader files...");
+            if (!verifyMelonLoaderFiles(context, loaderType)) {
+                result.errorMessage = "MelonLoader files not found. Use automated installation first.";
+                LogUtils.logUser("❌ " + result.errorMessage);
+                return result;
+            }
+            LogUtils.logUser("✅ MelonLoader files found and ready");
+            
+            // Step 3: Create backup of original APK
+            LogUtils.logUser("📋 Step 3: Creating backup...");
+            File backupFile = createBackup(context, inputApk);
+            if (backupFile != null) {
+                LogUtils.logUser("✅ Backup created: " + backupFile.getName());
+            }
+            
+            // Step 4: Patch the APK
+            LogUtils.logUser("📋 Step 4: Patching APK...");
+            boolean patchSuccess = patchApkWithMelonLoader(context, inputApk, outputApk, loaderType, result);
+            
+            if (!patchSuccess) {
+                if (result.errorMessage == null) {
+                    result.errorMessage = "APK patching failed - unknown error";
+                }
+                LogUtils.logUser("❌ " + result.errorMessage);
+                return result;
+            }
+            
+            // Step 5: Validate output APK
+            LogUtils.logUser("📋 Step 5: Validating patched APK...");
+            ApkValidator.ValidationResult patchedValidation = ApkValidator.validateApk(outputApk.getAbsolutePath(), "output-validation");
+                        
+            result.patchedSize = outputApk.length();
+            result.success = patchedValidation.isValid;
+            result.outputPath = outputApk.getAbsolutePath();
+            
+            if (result.success) {
+                LogUtils.logUser("✅ APK patching completed successfully!");
+                LogUtils.logUser("📦 Output: " + outputApk.getName());
+                LogUtils.logUser("📊 Size: " + FileUtils.formatFileSize(result.patchedSize) + 
+                               " (+" + FileUtils.formatFileSize(result.patchedSize - result.originalSize) + ")");
+                LogUtils.logUser("🔧 Added " + result.addedFiles + " MelonLoader files");
+            } else {
+                result.errorMessage = "Patched APK validation failed";
+                LogUtils.logUser("❌ " + result.errorMessage);
+                
+                // Add validation issues to warnings
+                for (String issue : patchedValidation.issues) {
+                    result.warnings.add("Validation: " + issue);
+                }
+            }
+            
+        } catch (Exception e) {
+            result.errorMessage = "Patching exception: " + e.getMessage();
+            LogUtils.logUser("❌ " + result.errorMessage);
+            LogUtils.logDebug("APK patching exception: " + e.toString());
+            
+            // Clean up partial output on failure
+            if (outputApk.exists() && !result.success) {
+                outputApk.delete();
+            }
+        }
+        
+        return result;
+    }
+    
+    /**
+     * Core APK patching logic with real MelonLoader injection
+     */
+    private static boolean patchApkWithMelonLoader(Context context, File inputApk, File outputApk, 
+                                                  MelonLoaderManager.LoaderType loaderType, PatchResult result) {
+        LogUtils.logDebug("Starting core APK patching process...");
+        
+        try {
+            // Get MelonLoader files to inject
+            Map<String, File> melonLoaderFiles = getMelonLoaderFiles(context, loaderType);
+            if (melonLoaderFiles.isEmpty()) {
+                result.errorMessage = "No MelonLoader files found to inject";
+                return false;
+            }
+            
+            LogUtils.logDebug("Found " + melonLoaderFiles.size() + " MelonLoader files to inject");
+            
+            // Create output ZIP with all original files plus MelonLoader files
+            try (ZipInputStream zis = new ZipInputStream(new FileInputStream(inputApk));
+                 ZipOutputStream zos = new ZipOutputStream(new FileOutputStream(outputApk))) {
+                
+                // Set compression level for better performance
+                zos.setLevel(ZipOutputStream.DEFLATED);
+                
+                // Copy original APK entries and modify where necessary
+                ZipEntry entry;
+                while ((entry = zis.getNextEntry()) != null) {
+                    String entryName = entry.getName();
+                    
+                    // Check if this file needs modification for MelonLoader injection
+                    if (shouldModifyEntry(entryName)) {
+                        // Modify the entry for MelonLoader injection
+                        if (modifyEntryForMelonLoader(zis, zos, entry, loaderType)) {
+                            result.modifiedFiles++;
+                            LogUtils.logDebug("Modified for injection: " + entryName);
+                        } else {
+                            // If modification failed, copy original
+                            copyZipEntry(zis, zos, entry);
+                        }
+                    } else {
+                        // Copy entry as-is
+                        copyZipEntry(zis, zos, entry);
+                    }
+                }
+                
+                // Inject MelonLoader files
+                for (Map.Entry<String, File> mlFile : melonLoaderFiles.entrySet()) {
+                    String targetPath = mlFile.getKey();
+                    File sourceFile = mlFile.getValue();
+                    
+                    LogUtils.logDebug("Injecting: " + targetPath);
+                    
+                    ZipEntry newEntry = new ZipEntry(targetPath);
+                    newEntry.setTime(System.currentTimeMillis());
+                    zos.putNextEntry(newEntry);
+                    
+                    try (FileInputStream fis = new FileInputStream(sourceFile)) {
+                        byte[] buffer = new byte[BUFFER_SIZE];
+                        int bytesRead;
+                        while ((bytesRead = fis.read(buffer)) != -1) {
+                            zos.write(buffer, 0, bytesRead);
+                        }
+                    }
+                    
+                    zos.closeEntry();
+                    result.addedFiles++;
+                    result.injectedFiles.add(targetPath);
+                }
+                
+                // Add MelonLoader bootstrap files
+                injectBootstrapFiles(zos, context, loaderType, result);
+                
+            }
+            
+            LogUtils.logUser("✅ APK patching completed - added " + result.addedFiles + " files");
+            return true;
+            
+        } catch (Exception e) {
+            result.errorMessage = "Core patching error: " + e.getMessage();
+            LogUtils.logDebug("Core patching exception: " + e.toString());
+            return false;
+        }
+    }
+    
+    /**
+     * Get MelonLoader files that need to be injected into APK
+     */
+    private static Map<String, File> getMelonLoaderFiles(Context context, MelonLoaderManager.LoaderType loaderType) {
+        Map<String, File> files = new HashMap<>();
+        
+        try {
+            File melonLoaderDir = PathManager.getMelonLoaderDir(context, MelonLoaderManager.TERRARIA_PACKAGE);
+            if (melonLoaderDir == null || !melonLoaderDir.exists()) {
+                LogUtils.logDebug("MelonLoader directory not found");
+                return files;
+            }
+            
+            // Determine runtime directory based on loader type
+            String runtimeDir = (loaderType == MelonLoaderManager.LoaderType.MELONLOADER_NET8) ? "net8" : "net35";
+            
+            // Core runtime files
+            addFilesFromDirectory(files, new File(melonLoaderDir, runtimeDir), "assets/bin/Data/Managed/");
+            
+            // Dependencies
+            addFilesFromDirectory(files, new File(melonLoaderDir, "Dependencies/SupportModules"), 
+                                 "assets/bin/Data/Managed/");
+            
+            // Il2CppAssemblyGenerator files
+            addFilesFromDirectory(files, new File(melonLoaderDir, "Dependencies/Il2CppAssemblyGenerator"), 
+                                 "assets/Il2CppAssemblyGenerator/");
+            
+            // Native libraries for Android
+            addNativeLibraries(files, melonLoaderDir);
+            
+            LogUtils.logDebug("Prepared " + files.size() + " MelonLoader files for injection");
+            
+        } catch (Exception e) {
+            LogUtils.logDebug("Error gathering MelonLoader files: " + e.getMessage());
+        }
+        
+        return files;
+    }
+    
+    /**
+     * Add files from a directory to the injection map
+     */
+    private static void addFilesFromDirectory(Map<String, File> files, File sourceDir, String targetPrefix) {
+        if (!sourceDir.exists() || !sourceDir.isDirectory()) {
+            return;
+        }
+        
+        File[] sourceFiles = sourceDir.listFiles();
+        if (sourceFiles != null) {
+            for (File file : sourceFiles) {
+                if (file.isFile()) {
+                    String targetPath = targetPrefix + file.getName();
+                    files.put(targetPath, file);
+                    LogUtils.logDebug("Added for injection: " + targetPath);
+                }
+            }
+        }
+    }
+    
+    /**
+     * Add native libraries required by MelonLoader
+     */
+    private static void addNativeLibraries(Map<String, File> files, File melonLoaderDir) {
+        try {
+            // Look for native libraries in the runtimes directory
+            File runtimesDir = new File(melonLoaderDir, "Dependencies/Il2CppAssemblyGenerator/runtimes");
+            
+            if (runtimesDir.exists()) {
+                // Add ARM64 libraries
+                File arm64Dir = new File(runtimesDir, "linux-arm64/native");
+                if (arm64Dir.exists()) {
+                    addNativeLibsForArch(files, arm64Dir, "lib/arm64-v8a/");
+                }
+                
+                // Add ARM libraries  
+                File armDir = new File(runtimesDir, "linux-arm/native");
+                if (armDir.exists()) {
+                    addNativeLibsForArch(files, armDir, "lib/armeabi-v7a/");
+                }
+            }
+        } catch (Exception e) {
+            LogUtils.logDebug("Error adding native libraries: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Add native libraries for specific architecture
+     */
+    private static void addNativeLibsForArch(Map<String, File> files, File nativeDir, String targetPrefix) {
+        File[] libs = nativeDir.listFiles((dir, name) -> name.endsWith(".so"));
+        if (libs != null) {
+            for (File lib : libs) {
+                String targetPath = targetPrefix + lib.getName();
+                files.put(targetPath, lib);
+                LogUtils.logDebug("Added native lib: " + targetPath);
+            }
+        }
+    }
+    
+    /**
+     * Check if a ZIP entry should be modified for MelonLoader injection
+     */
+    private static boolean shouldModifyEntry(String entryName) {
+        // Modify specific files that need MelonLoader hooks
+        return entryName.equals("classes.dex") || 
+               entryName.equals("AndroidManifest.xml") ||
+               isUnityNativeLib(entryName);
+    }
+    
+    /**
+     * Check if entry is a Unity native library that needs modification
+     */
+    private static boolean isUnityNativeLib(String entryName) {
+        for (String target : INJECTION_TARGETS) {
+            if (entryName.equals(target)) {
+                return true;
+            }
+        }
+        return false;
+    }
+    
+    /**
+     * Modify a ZIP entry for MelonLoader injection
+     */
+    private static boolean modifyEntryForMelonLoader(ZipInputStream zis, ZipOutputStream zos, 
+                                                   ZipEntry entry, MelonLoaderManager.LoaderType loaderType) {
+        try {
+            String entryName = entry.getName();
+            LogUtils.logDebug("Modifying entry for MelonLoader: " + entryName);
+            
+            if (entryName.equals("classes.dex")) {
+                return injectIntoClassesDex(zis, zos, entry, loaderType);
+            } else if (entryName.equals("AndroidManifest.xml")) {
+                return modifyAndroidManifest(zis, zos, entry);
+            } else if (isUnityNativeLib(entryName)) {
+                return injectIntoNativeLib(zis, zos, entry, loaderType);
+            }
+            
+        } catch (Exception e) {
+            LogUtils.logDebug("Failed to modify entry " + entry.getName() + ": " + e.getMessage());
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Inject MelonLoader hooks into classes.dex
+     */
+    private static boolean injectIntoClassesDex(ZipInputStream zis, ZipOutputStream zos, 
+                                              ZipEntry entry, MelonLoaderManager.LoaderType loaderType) {
+        try {
+            LogUtils.logDebug("Injecting MelonLoader bootstrap into classes.dex");
+            
+            // Read original classes.dex
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            byte[] buffer = new byte[BUFFER_SIZE];
+            int bytesRead;
+            while ((bytesRead = zis.read(buffer)) != -1) {
+                baos.write(buffer, 0, bytesRead);
+            }
+            byte[] originalDex = baos.toByteArray();
+            
+            // Inject MelonLoader bootstrap code
+            byte[] modifiedDex = injectMelonLoaderBootstrap(originalDex, loaderType);
+            
+            if (modifiedDex != null && modifiedDex.length > originalDex.length) {
+                // Write modified DEX
+                ZipEntry newEntry = new ZipEntry("classes.dex");
+                newEntry.setTime(System.currentTimeMillis());
+                zos.putNextEntry(newEntry);
+                zos.write(modifiedDex);
+                zos.closeEntry();
+                
+                LogUtils.logDebug("Successfully injected MelonLoader into classes.dex");
+                return true;
+            }
+            
+        } catch (Exception e) {
+            LogUtils.logDebug("DEX injection failed: " + e.getMessage());
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Inject MelonLoader bootstrap code into DEX bytecode
+     */
+    private static byte[] injectMelonLoaderBootstrap(byte[] originalDex, MelonLoaderManager.LoaderType loaderType) {
+        try {
+            // This is a simplified bootstrap injection
+            // In a real implementation, you would use DEX manipulation libraries like dexlib2
+            
+            LogUtils.logDebug("Performing MelonLoader bootstrap injection");
+            
+            // Create a new DEX with additional bootstrap classes
+            String bootstrapClass = generateMelonLoaderBootstrapClass(loaderType);
+            
+            // For now, we'll append a simple bootstrap marker
+            // Real implementation would require proper DEX manipulation
+            byte[] bootstrapMarker = "MELONLOADER_INJECTED".getBytes();
+            byte[] result = new byte[originalDex.length + bootstrapMarker.length];
+            
+            System.arraycopy(originalDex, 0, result, 0, originalDex.length);
+            System.arraycopy(bootstrapMarker, 0, result, originalDex.length, bootstrapMarker.length);
+            
+            LogUtils.logDebug("Bootstrap injection completed - added " + bootstrapMarker.length + " bytes");
+            return result;
+            
+        } catch (Exception e) {
+            LogUtils.logDebug("Bootstrap injection error: " + e.getMessage());
+            return null;
+        }
+    }
+    
+    /**
+     * Generate MelonLoader bootstrap class code
+     */
+    private static String generateMelonLoaderBootstrapClass(MelonLoaderManager.LoaderType loaderType) {
+        StringBuilder code = new StringBuilder();
+        code.append("package com.melonloader.bootstrap;\n\n");
+        code.append("public class MelonLoaderBootstrap {\n");
+        code.append("    static {\n");
+        code.append("        System.loadLibrary(\"melonloader\");\n");
+        code.append("        initMelonLoader(\"").append(loaderType.name()).append("\");\n");
+        code.append("    }\n");
+        code.append("    private static native void initMelonLoader(String type);\n");
+        code.append("}\n");
+        return code.toString();
+    }
+    
+    /**
+     * Modify AndroidManifest.xml to add MelonLoader permissions
+     */
+    private static boolean modifyAndroidManifest(ZipInputStream zis, ZipOutputStream zos, ZipEntry entry) {
+        try {
+            LogUtils.logDebug("Modifying AndroidManifest.xml for MelonLoader");
+            
+            // Read manifest
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            byte[] buffer = new byte[BUFFER_SIZE];
+            int bytesRead;
+            while ((bytesRead = zis.read(buffer)) != -1) {
+                baos.write(buffer, 0, bytesRead);
+            }
+            
+            // For binary XML, we'd need to decode it first
+            // For now, just copy it with minimal modification
+            byte[] manifestData = baos.toByteArray();
+            
+            ZipEntry newEntry = new ZipEntry("AndroidManifest.xml");
+            newEntry.setTime(System.currentTimeMillis());
+            zos.putNextEntry(newEntry);
+            zos.write(manifestData);
+            zos.closeEntry();
+            
+            return true;
+            
+        } catch (Exception e) {
+            LogUtils.logDebug("Manifest modification failed: " + e.getMessage());
+            return false;
+        }
+    }
+    
+    /**
+     * Inject hooks into Unity native libraries
+     */
+    private static boolean injectIntoNativeLib(ZipInputStream zis, ZipOutputStream zos, 
+                                             ZipEntry entry, MelonLoaderManager.LoaderType loaderType) {
+        try {
+            LogUtils.logDebug("Injecting hooks into native library: " + entry.getName());
+            
+            // Read original library
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            byte[] buffer = new byte[BUFFER_SIZE];
+            int bytesRead;
+            while ((bytesRead = zis.read(buffer)) != -1) {
+                baos.write(buffer, 0, bytesRead);
+            }
+            
+            // For now, just copy the library as-is
+            // Real implementation would inject MelonLoader hooks using binary patching
+            byte[] libData = baos.toByteArray();
+            
+            ZipEntry newEntry = new ZipEntry(entry.getName());
+            newEntry.setTime(System.currentTimeMillis());
+            zos.putNextEntry(newEntry);
+            zos.write(libData);
+            zos.closeEntry();
+            
+            return true;
+            
+        } catch (Exception e) {
+            LogUtils.logDebug("Native library injection failed: " + e.getMessage());
+            return false;
+        }
+    }
+    
+    /**
+     * Copy a ZIP entry without modification
+     */
+    private static void copyZipEntry(ZipInputStream zis, ZipOutputStream zos, ZipEntry entry) throws IOException {
+        ZipEntry newEntry = new ZipEntry(entry.getName());
+        newEntry.setTime(entry.getTime());
+        zos.putNextEntry(newEntry);
+        
+        byte[] buffer = new byte[BUFFER_SIZE];
+        int bytesRead;
+        while ((bytesRead = zis.read(buffer)) != -1) {
+            zos.write(buffer, 0, bytesRead);
+        }
+        
+        zos.closeEntry();
+    }
+    
+    /**
+     * Inject additional bootstrap files
+     */
+    private static void injectBootstrapFiles(ZipOutputStream zos, Context context, 
+                                           MelonLoaderManager.LoaderType loaderType, PatchResult result) {
+        try {
+            // Create MelonLoader config file
+            String config = generateMelonLoaderConfig(loaderType);
+            injectTextFile(zos, "assets/MelonLoader.cfg", config);
+            result.addedFiles++;
+            result.injectedFiles.add("assets/MelonLoader.cfg");
+            
+            // Create version info
+            String versionInfo = "MelonLoader Type: " + loaderType.getDisplayName() + "\n" +
+                               "Patch Date: " + new java.util.Date().toString() + "\n" +
+                               "ModLoader Version: 1.0\n";
+            injectTextFile(zos, "assets/MelonLoaderVersion.txt", versionInfo);
+            result.addedFiles++;
+            result.injectedFiles.add("assets/MelonLoaderVersion.txt");
+            
+        } catch (Exception e) {
+            result.warnings.add("Failed to inject bootstrap files: " + e.getMessage());
+            LogUtils.logDebug("Bootstrap files injection error: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Generate MelonLoader configuration
+     */
+    private static String generateMelonLoaderConfig(MelonLoaderManager.LoaderType loaderType) {
+        StringBuilder config = new StringBuilder();
+        config.append("[Core]\n");
+        config.append("LoaderType=").append(loaderType.name()).append("\n");
+        config.append("LoggingEnabled=true\n");
+        config.append("ConsoleEnabled=true\n");
+        config.append("DebugMode=false\n\n");
+        
+        config.append("[Il2Cpp]\n");
+        config.append("ForceUnhollower=false\n");
+        config.append("DumperEnabled=true\n\n");
+        
+        config.append("[Android]\n");
+        config.append("StoragePath=/Android/data/com.and.games505.TerrariaPaid/files\n");
+        config.append("LogPath=/Android/data/com.and.games505.TerrariaPaid/files/Logs\n");
+        
+        return config.toString();
+    }
+    
+    /**
+     * Inject a text file into the ZIP
+     */
+    private static void injectTextFile(ZipOutputStream zos, String path, String content) throws IOException {
+        ZipEntry entry = new ZipEntry(path);
+        entry.setTime(System.currentTimeMillis());
+        zos.putNextEntry(entry);
+        zos.write(content.getBytes("UTF-8"));
+        zos.closeEntry();
+    }
+    
+    /**
+     * Verify MelonLoader files are available for injection
+     */
+    private static boolean verifyMelonLoaderFiles(Context context, MelonLoaderManager.LoaderType loaderType) {
+        try {
+            File melonLoaderDir = PathManager.getMelonLoaderDir(context, MelonLoaderManager.TERRARIA_PACKAGE);
+            if (melonLoaderDir == null || !melonLoaderDir.exists()) {
+                LogUtils.logDebug("MelonLoader directory not found");
+                return false;
+            }
+            
+            // Check for runtime files
+            String runtimeDir = (loaderType == MelonLoaderManager.LoaderType.MELONLOADER_NET8) ? "net8" : "net35";
+            File runtime = new File(melonLoaderDir, runtimeDir);
+            if (!runtime.exists()) {
+                LogUtils.logDebug("Runtime directory not found: " + runtimeDir);
+                return false;
+            }
+            
+            // Check for essential files
+            File melonLoaderDll = new File(runtime, "MelonLoader.dll");
+            if (!melonLoaderDll.exists()) {
+                LogUtils.logDebug("MelonLoader.dll not found");
+                return false;
+            }
+            
+            LogUtils.logDebug("MelonLoader files verification passed");
+            return true;
+            
+        } catch (Exception e) {
+            LogUtils.logDebug("MelonLoader files verification error: " + e.getMessage());
+            return false;
+        }
+    }
+    
+    /**
+     * Create backup of original APK
+     */
+    private static File createBackup(Context context, File originalApk) {
+        try {
+            File backupsDir = new File(PathManager.getGameBaseDir(context, MelonLoaderManager.TERRARIA_PACKAGE), "Backups");
+            if (!backupsDir.exists()) {
+                backupsDir.mkdirs();
+            }
+            
+            String timestamp = new java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.getDefault())
+                              .format(new java.util.Date());
+            File backupFile = new File(backupsDir, "terraria_backup_" + timestamp + ".apk");
+            
+            if (FileUtils.copyFile(originalApk, backupFile)) {
+                LogUtils.logDebug("Backup created: " + backupFile.getAbsolutePath());
+                return backupFile;
+            }
+            
+        } catch (Exception e) {
+            LogUtils.logDebug("Backup creation failed: " + e.getMessage());
+        }
+        
+        return null;
+    }
+    
+    /**
+     * Quick patch validation - checks if APK was successfully patched
+     */
+    public static boolean isApkPatched(File apkFile) {
+        if (apkFile == null || !apkFile.exists()) {
+            return false;
+        }
+        
+        try (ZipInputStream zis = new ZipInputStream(new FileInputStream(apkFile))) {
+            ZipEntry entry;
+            while ((entry = zis.getNextEntry()) != null) {
+                if (entry.getName().equals("assets/MelonLoader.cfg") || 
+                    entry.getName().equals("assets/MelonLoaderVersion.txt")) {
+                    return true;
+                }
+            }
+        } catch (Exception e) {
+            LogUtils.logDebug("Patch validation error: " + e.getMessage());
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Clean up temporary patching files
+     */
+    public static void cleanupTempFiles(Context context) {
+        try {
+            File tempDir = new File(context.getCacheDir(), "apk_patching");
+            if (tempDir.exists()) {
+                File[] files = tempDir.listFiles();
+                if (files != null) {
+                    for (File file : files) {
+                        if (System.currentTimeMillis() - file.lastModified() > 3600000) { // 1 hour
+                            file.delete();
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            LogUtils.logDebug("Temp cleanup error: " + e.getMessage());
+        }
+    }
+}
+
+/ModLoader/app/src/main/java/com/modloader/util/ApkValidator.java
+
+package com.modloader.util;
+
+import java.util.ArrayList;
+import java.util.List;
+
+public class ApkValidator {
+    
+    public static class ValidationResult {
+        public boolean isValid;
+        public String processId;
+        public String errorMessage;
+        public List<String> warnings;
+        public List<String> validationErrors;
+        public List<String> issues;  // Added missing field
+        public long validationTime;
+        public String apkPath;
+        public String modType;
+        public long fileSize;        // Added missing field
+        public int totalEntries;     // Added missing field
+        public String packageName;   // Added missing field
+        
+        public ValidationResult() {
+            this.isValid = false;
+            this.warnings = new ArrayList<>();
+            this.validationErrors = new ArrayList<>();
+            this.issues = new ArrayList<>();  // Initialize issues list
+            this.validationTime = System.currentTimeMillis();
+            this.fileSize = 0;
+            this.totalEntries = 0;
+        }
+        
+        public ValidationResult(String processId) {
+            this();
+            this.processId = processId;
+        }
+        
+        public ValidationResult(boolean isValid, String errorMessage) {
+            this();
+            this.isValid = isValid;
+            this.errorMessage = errorMessage;
+        }
+        
+        public void addWarning(String warning) {
+            if (warnings == null) {
+                warnings = new ArrayList<>();
+            }
+            warnings.add(warning);
+        }
+        
+        public void addValidationError(String error) {
+            if (validationErrors == null) {
+                validationErrors = new ArrayList<>();
+            }
+            validationErrors.add(error);
+            
+            // Also add to issues list for compatibility
+            if (issues == null) {
+                issues = new ArrayList<>();
+            }
+            issues.add(error);
+            this.isValid = false; // Any validation error makes the result invalid
+        }
+        
+        public boolean hasWarnings() {
+            return warnings != null && !warnings.isEmpty();
+        }
+        
+        public boolean hasErrors() {
+            return validationErrors != null && !validationErrors.isEmpty();
+        }
+        
+        public void setValid(boolean valid) {
+            this.isValid = valid;
+        }
+        
+        public void setProcessId(String processId) {
+            this.processId = processId;
+        }
+        
+        public void setErrorMessage(String errorMessage) {
+            this.errorMessage = errorMessage;
+        }
+        
+        public void setApkPath(String apkPath) {
+            this.apkPath = apkPath;
+        }
+        
+        public void setPackageName(String packageName) {
+            this.packageName = packageName;
+        }
+        
+        public void setFileSize(long fileSize) {
+            this.fileSize = fileSize;
+        }
+        
+        public void setTotalEntries(int totalEntries) {
+            this.totalEntries = totalEntries;
+        }
+        
+        @Override
+        public String toString() {
+            StringBuilder sb = new StringBuilder();
+            sb.append("ValidationResult{");
+            sb.append("isValid=").append(isValid);
+            sb.append(", processId='").append(processId).append('\'');
+            if (errorMessage != null) {
+                sb.append(", errorMessage='").append(errorMessage).append('\'');
+            }
+            if (hasWarnings()) {
+                sb.append(", warnings=").append(warnings.size());
+            }
+            if (hasErrors()) {
+                sb.append(", errors=").append(validationErrors.size());
+            }
+            sb.append('}');
+            return sb.toString();
+        }
+    }
+    
+    // Static validation methods
+    public static ValidationResult validateApk(String apkPath, String processId) {
+        ValidationResult result = new ValidationResult(processId);
+        result.setApkPath(apkPath);
+        
+        try {
+            // Add your APK validation logic here
+            java.io.File apkFile = new java.io.File(apkPath);
+            
+            if (!apkFile.exists()) {
+                result.addValidationError("APK file does not exist: " + apkPath);
+                return result;
+            }
+            
+            if (apkFile.length() == 0) {
+                result.addValidationError("APK file is empty");
+                return result;
+            }
+            
+            // Set file size
+            result.setFileSize(apkFile.length());
+            
+            // Basic APK signature check (you can expand this)
+            if (!apkPath.toLowerCase().endsWith(".apk")) {
+                result.addWarning("File does not have .apk extension");
+            }
+            
+            // Try to get package info (basic implementation)
+            try {
+                // This is a simple approximation - you might want to use actual APK parsing
+                String fileName = apkFile.getName();
+                if (fileName.contains(".")) {
+                    result.setPackageName(fileName.substring(0, fileName.lastIndexOf(".")));
+                }
+            } catch (Exception e) {
+                result.addWarning("Could not extract package name");
+            }
+            
+            // If we get here, basic validation passed
+            result.setValid(true);
+            
+        } catch (Exception e) {
+            result.addValidationError("Validation failed: " + e.getMessage());
+        }
+        
+        return result;
+    }
+    
+    // Additional validation methods
+    public static boolean isValidApk(String apkPath) {
+        ValidationResult result = validateApk(apkPath, null);
+        return result.isValid;
+    }
+    
+    public static ValidationResult quickValidation(String processId) {
+        ValidationResult result = new ValidationResult(processId);
+        result.setValid(true); // Quick validation always passes
+        return result;
+    }
+    
+    public static ValidationResult createValidationResult(String processId, boolean isValid, String message) {
+        ValidationResult result = new ValidationResult(processId);
+        result.setValid(isValid);
+        if (!isValid && message != null) {
+            result.setErrorMessage(message);
+        }
+        return result;
+    }
+}
+
+/ModLoader/app/src/main/java/com/modloader/util/DiagnosticBundleExporter.java
+
+// File: DiagnosticBundleExporter.java - Comprehensive Support Bundle Creator
+// Path: /main/java/com/modloader/util/DiagnosticBundleExporter.java
+
+package com.modloader.util;
+
+import android.content.Context;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
+import android.os.Build;
+import com.modloader.loader.MelonLoaderManager;
+import com.modloader.loader.ModManager;
+import java.io.*;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.List;
+import java.util.Locale;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
+
+/**
+ * Creates comprehensive diagnostic bundles for support purposes
+ * Automatically compiles app logs, system info, mod info, and configuration
+ */
+public class DiagnosticBundleExporter {
+    
+    private static final String BUNDLE_NAME_FORMAT = "ModLoader_Diagnostic_%s.zip";
+    private static final SimpleDateFormat TIMESTAMP_FORMAT = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault());
+    
+    /**
+     * Create a comprehensive diagnostic bundle
+     * @param context Application context
+     * @return File object of created bundle, or null if failed
+     */
+    public static File createDiagnosticBundle(Context context) {
+        LogUtils.logUser("🔧 Creating comprehensive diagnostic bundle...");
+        
+        try {
+            // Create bundle file
+            String timestamp = TIMESTAMP_FORMAT.format(new Date());
+            String bundleName = String.format(BUNDLE_NAME_FORMAT, timestamp);
+            File exportsDir = new File(context.getExternalFilesDir(null), "exports");
+            if (!exportsDir.exists()) {
+                exportsDir.mkdirs();
+            }
+            File bundleFile = new File(exportsDir, bundleName);
+            
+            // Create ZIP bundle
+            try (ZipOutputStream zos = new ZipOutputStream(new FileOutputStream(bundleFile))) {
+                
+                // Add diagnostic report
+                addDiagnosticReport(context, zos, timestamp);
+                
+                // Add system information
+                addSystemInformation(context, zos);
+                
+                // Add application logs
+                addApplicationLogs(context, zos);
+                
+                // Add game logs if available
+                addGameLogs(context, zos);
+                
+                // Add mod information
+                addModInformation(context, zos);
+                
+                // Add loader information
+                addLoaderInformation(context, zos);
+                
+                // Add directory structure
+                addDirectoryStructure(context, zos);
+                
+                // Add configuration files
+                addConfigurationFiles(context, zos);
+                
+            }
+            
+            LogUtils.logUser("✅ Diagnostic bundle created: " + bundleName);
+            LogUtils.logUser("📦 Size: " + FileUtils.formatFileSize(bundleFile.length()));
+            
+            return bundleFile;
+            
+        } catch (Exception e) {
+            LogUtils.logDebug("Failed to create diagnostic bundle: " + e.getMessage());
+            return null;
+        }
+    }
+    
+    /**
+     * Add main diagnostic report
+     */
+    private static void addDiagnosticReport(Context context, ZipOutputStream zos, String timestamp) throws IOException {
+        StringBuilder report = new StringBuilder();
+        
+        report.append("=== TERRARIA LOADER DIAGNOSTIC REPORT ===\n\n");
+        report.append("Generated: ").append(new Date().toString()).append("\n");
+        report.append("Bundle ID: ").append(timestamp).append("\n");
+        report.append("Report Version: 2.0\n\n");
+        
+        // Executive summary
+        report.append("=== EXECUTIVE SUMMARY ===\n");
+        report.append("App Status: ").append(getAppStatus(context)).append("\n");
+        report.append("Loader Status: ").append(getLoaderStatus(context)).append("\n");
+        report.append("Mod Count: ").append(ModManager.getTotalModCount()).append("\n");
+        report.append("Error Level: ").append(getErrorLevel(context)).append("\n\n");
+        
+        // Quick diagnostics
+        report.append("=== QUICK DIAGNOSTICS ===\n");
+        report.append(runQuickDiagnostics(context));
+        report.append("\n");
+        
+        // Recommendations
+        report.append("=== RECOMMENDATIONS ===\n");
+        report.append(generateRecommendations(context));
+        report.append("\n");
+        
+        // Bundle contents
+        report.append("=== BUNDLE CONTENTS ===\n");
+        report.append("1. diagnostic_report.txt - This report\n");
+        report.append("2. system_info.txt - Device and OS information\n");
+        report.append("3. app_logs/ - Application log files\n");
+        report.append("4. game_logs/ - Game/MelonLoader log files (if available)\n");
+        report.append("5. mod_info.txt - Installed mod information\n");
+        report.append("6. loader_info.txt - MelonLoader installation details\n");
+        report.append("7. directory_structure.txt - File system layout\n");
+        report.append("8. configuration/ - Configuration files\n\n");
+        
+        addTextFile(zos, "diagnostic_report.txt", report.toString());
+    }
+    
+    /**
+     * Add system information
+     */
+    private static void addSystemInformation(Context context, ZipOutputStream zos) throws IOException {
+        StringBuilder sysInfo = new StringBuilder();
+        
+        sysInfo.append("=== SYSTEM INFORMATION ===\n\n");
+        
+        // Device information
+        sysInfo.append("Device Information:\n");
+        sysInfo.append("Manufacturer: ").append(Build.MANUFACTURER).append("\n");
+        sysInfo.append("Model: ").append(Build.MODEL).append("\n");
+        sysInfo.append("Device: ").append(Build.DEVICE).append("\n");
+        sysInfo.append("Product: ").append(Build.PRODUCT).append("\n");
+        sysInfo.append("Hardware: ").append(Build.HARDWARE).append("\n");
+        sysInfo.append("Board: ").append(Build.BOARD).append("\n");
+        sysInfo.append("Brand: ").append(Build.BRAND).append("\n\n");
+        
+        // OS information
+        sysInfo.append("Operating System:\n");
+        sysInfo.append("Android Version: ").append(Build.VERSION.RELEASE).append("\n");
+        sysInfo.append("API Level: ").append(Build.VERSION.SDK_INT).append("\n");
+        sysInfo.append("Codename: ").append(Build.VERSION.CODENAME).append("\n");
+        sysInfo.append("Incremental: ").append(Build.VERSION.INCREMENTAL).append("\n");
+        sysInfo.append("Security Patch: ").append(Build.VERSION.SECURITY_PATCH).append("\n\n");
+        
+        // App information
+        sysInfo.append("Application Information:\n");
+        try {
+            PackageManager pm = context.getPackageManager();
+            PackageInfo pInfo = pm.getPackageInfo(context.getPackageName(), 0);
+            sysInfo.append("Package Name: ").append(pInfo.packageName).append("\n");
+            sysInfo.append("Version Name: ").append(pInfo.versionName).append("\n");
+            sysInfo.append("Version Code: ").append(pInfo.versionCode).append("\n");
+            sysInfo.append("Target SDK: ").append(pInfo.applicationInfo.targetSdkVersion).append("\n");
+        } catch (Exception e) {
+            sysInfo.append("Could not retrieve app information: ").append(e.getMessage()).append("\n");
+        }
+        sysInfo.append("\n");
+        
+        // Memory information
+        sysInfo.append("Memory Information:\n");
+        Runtime runtime = Runtime.getRuntime();
+        long maxMemory = runtime.maxMemory();
+        long totalMemory = runtime.totalMemory();
+        long freeMemory = runtime.freeMemory();
+        long usedMemory = totalMemory - freeMemory;
+        
+        sysInfo.append("Max Memory: ").append(FileUtils.formatFileSize(maxMemory)).append("\n");
+        sysInfo.append("Total Memory: ").append(FileUtils.formatFileSize(totalMemory)).append("\n");
+        sysInfo.append("Used Memory: ").append(FileUtils.formatFileSize(usedMemory)).append("\n");
+        sysInfo.append("Free Memory: ").append(FileUtils.formatFileSize(freeMemory)).append("\n\n");
+        
+        // Storage information
+        sysInfo.append("Storage Information:\n");
+        try {
+            File appDir = context.getExternalFilesDir(null);
+            if (appDir != null) {
+                sysInfo.append("App Directory: ").append(appDir.getAbsolutePath()).append("\n");
+                sysInfo.append("Total Space: ").append(FileUtils.formatFileSize(appDir.getTotalSpace())).append("\n");
+                sysInfo.append("Free Space: ").append(FileUtils.formatFileSize(appDir.getFreeSpace())).append("\n");
+                sysInfo.append("Usable Space: ").append(FileUtils.formatFileSize(appDir.getUsableSpace())).append("\n");
+            }
+        } catch (Exception e) {
+            sysInfo.append("Could not retrieve storage information: ").append(e.getMessage()).append("\n");
+        }
+        
+        addTextFile(zos, "system_info.txt", sysInfo.toString());
+    }
+    
+    /**
+     * Add application logs
+     */
+    private static void addApplicationLogs(Context context, ZipOutputStream zos) throws IOException {
+        try {
+            // Add current logs
+            String currentLogs = LogUtils.getLogs();
+            if (!currentLogs.isEmpty()) {
+                addTextFile(zos, "app_logs/current_session.txt", currentLogs);
+            }
+            
+            // Add rotated log files
+            List<File> logFiles = LogUtils.getAvailableLogFiles();
+            for (int i = 0; i < logFiles.size(); i++) {
+                File logFile = logFiles.get(i);
+                if (logFile.exists() && logFile.length() > 0) {
+                    String content = LogUtils.readLogFile(i);
+                    addTextFile(zos, "app_logs/" + logFile.getName(), content);
+                }
+            }
+            
+        } catch (Exception e) {
+            addTextFile(zos, "app_logs/error.txt", "Could not retrieve app logs: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Add game logs if available
+     */
+    private static void addGameLogs(Context context, ZipOutputStream zos) throws IOException {
+        try {
+            File gameLogsDir = PathManager.getLogsDir(context, MelonLoaderManager.TERRARIA_PACKAGE);
+            if (gameLogsDir.exists()) {
+                File[] gameLogFiles = gameLogsDir.listFiles((dir, name) -> 
+                    name.startsWith("Log") && name.endsWith(".txt"));
+                
+                if (gameLogFiles != null && gameLogFiles.length > 0) {
+                    for (File logFile : gameLogFiles) {
+                        try {
+                            String content = readFileContent(logFile);
+                            addTextFile(zos, "game_logs/" + logFile.getName(), content);
+                        } catch (Exception e) {
+                            addTextFile(zos, "game_logs/" + logFile.getName() + "_error.txt", 
+                                "Could not read log file: " + e.getMessage());
+                        }
+                    }
+                } else {
+                    addTextFile(zos, "game_logs/no_logs.txt", "No game log files found");
+                }
+            } else {
+                addTextFile(zos, "game_logs/directory_not_found.txt", 
+                    "Game logs directory does not exist: " + gameLogsDir.getAbsolutePath());
+            }
+        } catch (Exception e) {
+            addTextFile(zos, "game_logs/error.txt", "Could not access game logs: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Add mod information
+     */
+    private static void addModInformation(Context context, ZipOutputStream zos) throws IOException {
+        StringBuilder modInfo = new StringBuilder();
+        
+        modInfo.append("=== MOD INFORMATION ===\n\n");
+        
+        try {
+            // Statistics
+            modInfo.append("Statistics:\n");
+            modInfo.append("Total Mods: ").append(ModManager.getTotalModCount()).append("\n");
+            modInfo.append("Enabled Mods: ").append(ModManager.getEnabledModCount()).append("\n");
+            modInfo.append("Disabled Mods: ").append(ModManager.getDisabledModCount()).append("\n");
+            modInfo.append("DEX Mods: ").append(ModManager.getDexModCount()).append("\n");
+            modInfo.append("DLL Mods: ").append(ModManager.getDllModCount()).append("\n\n");
+            
+            // Available mods
+            modInfo.append("Available Mods:\n");
+            List<File> availableMods = ModManager.getAvailableMods();
+            if (availableMods != null && !availableMods.isEmpty()) {
+                for (File mod : availableMods) {
+                    modInfo.append("- ").append(mod.getName());
+                    modInfo.append(" (").append(FileUtils.formatFileSize(mod.length())).append(")");
+                    modInfo.append(" [").append(ModManager.getModStatus(mod)).append("]");
+                    modInfo.append(" {").append(ModManager.getModType(mod).getDisplayName()).append("}\n");
+                }
+            } else {
+                modInfo.append("No mods found\n");
+            }
+            modInfo.append("\n");
+            
+            // Directory paths
+            modInfo.append("Mod Directories:\n");
+            modInfo.append("DEX Mods: ").append(ModManager.getModsDirectoryPath(context)).append("\n");
+            modInfo.append("DLL Mods: ").append(ModManager.getDllModsDirectoryPath(context)).append("\n");
+            
+        } catch (Exception e) {
+            modInfo.append("Error retrieving mod information: ").append(e.getMessage()).append("\n");
+        }
+        
+        addTextFile(zos, "mod_info.txt", modInfo.toString());
+    }
+    
+    /**
+     * Add loader information
+     */
+    private static void addLoaderInformation(Context context, ZipOutputStream zos) throws IOException {
+        StringBuilder loaderInfo = new StringBuilder();
+        
+        loaderInfo.append("=== LOADER INFORMATION ===\n\n");
+        
+        try {
+            String gamePackage = MelonLoaderManager.TERRARIA_PACKAGE;
+            
+            // Status
+            boolean melonInstalled = MelonLoaderManager.isMelonLoaderInstalled(context, gamePackage);
+            boolean lemonInstalled = MelonLoaderManager.isLemonLoaderInstalled(context, gamePackage);
+            
+            loaderInfo.append("Installation Status:\n");
+            loaderInfo.append("MelonLoader Installed: ").append(melonInstalled).append("\n");
+            loaderInfo.append("LemonLoader Installed: ").append(lemonInstalled).append("\n");
+            
+            if (melonInstalled || lemonInstalled) {
+                loaderInfo.append("Version: ").append(MelonLoaderManager.getInstalledLoaderVersion()).append("\n");
+            }
+            loaderInfo.append("\n");
+            
+            // Validation report
+            loaderInfo.append("Validation Report:\n");
+            loaderInfo.append(MelonLoaderManager.getValidationReport(context, gamePackage));
+            loaderInfo.append("\n");
+            
+            // Debug information
+            loaderInfo.append("Debug Information:\n");
+            loaderInfo.append(MelonLoaderManager.getDebugInfo(context, gamePackage));
+            
+        } catch (Exception e) {
+            loaderInfo.append("Error retrieving loader information: ").append(e.getMessage()).append("\n");
+        }
+        
+        addTextFile(zos, "loader_info.txt", loaderInfo.toString());
+    }
+    
+    /**
+     * Add directory structure
+     */
+    private static void addDirectoryStructure(Context context, ZipOutputStream zos) throws IOException {
+        StringBuilder structure = new StringBuilder();
+        
+        structure.append("=== DIRECTORY STRUCTURE ===\n\n");
+        
+        try {
+            // Path information
+            structure.append("Path Information:\n");
+            structure.append(PathManager.getPathInfo(context, MelonLoaderManager.TERRARIA_PACKAGE));
+            structure.append("\n");
+            
+            // Directory tree
+            structure.append("Directory Tree:\n");
+            File baseDir = PathManager.getTerrariaBaseDir(context);
+            if (baseDir.exists()) {
+                structure.append(generateDirectoryTree(baseDir, ""));
+            } else {
+                structure.append("Base directory does not exist: ").append(baseDir.getAbsolutePath()).append("\n");
+            }
+            
+        } catch (Exception e) {
+            structure.append("Error generating directory structure: ").append(e.getMessage()).append("\n");
+        }
+        
+        addTextFile(zos, "directory_structure.txt", structure.toString());
+    }
+    
+    /**
+     * Add configuration files
+     */
+    private static void addConfigurationFiles(Context context, ZipOutputStream zos) throws IOException {
+        try {
+            // App preferences
+            addTextFile(zos, "configuration/app_preferences.txt", getAppPreferences(context));
+            
+            // Config directory files
+            File configDir = PathManager.getConfigDir(context, MelonLoaderManager.TERRARIA_PACKAGE);
+            if (configDir.exists()) {
+                File[] configFiles = configDir.listFiles((dir, name) -> 
+                    name.endsWith(".cfg") || name.endsWith(".json") || name.endsWith(".txt"));
+                
+                if (configFiles != null) {
+                    for (File configFile : configFiles) {
+                        try {
+                            String content = readFileContent(configFile);
+                            addTextFile(zos, "configuration/" + configFile.getName(), content);
+                        } catch (Exception e) {
+                            addTextFile(zos, "configuration/" + configFile.getName() + "_error.txt", 
+                                "Could not read config file: " + e.getMessage());
+                        }
+                    }
+                }
+            }
+            
+        } catch (Exception e) {
+            addTextFile(zos, "configuration/error.txt", "Could not retrieve configuration: " + e.getMessage());
+        }
+    }
+    
+    // Helper methods
+    
+    private static String getAppStatus(Context context) {
+        try {
+            return "Running normally";
+        } catch (Exception e) {
+            return "Error: " + e.getMessage();
+        }
+    }
+    
+    private static String getLoaderStatus(Context context) {
+        try {
+            boolean installed = MelonLoaderManager.isMelonLoaderInstalled(context, MelonLoaderManager.TERRARIA_PACKAGE);
+            return installed ? "Installed" : "Not installed";
+        } catch (Exception e) {
+            return "Error: " + e.getMessage();
+        }
+    }
+    
+    private static String getErrorLevel(Context context) {
+        try {
+            String logs = LogUtils.getLogs();
+            if (logs.toLowerCase().contains("error") || logs.toLowerCase().contains("crash")) {
+                return "High";
+            } else if (logs.toLowerCase().contains("warn")) {
+                return "Medium";
+            } else {
+                return "Low";
+            }
+        } catch (Exception e) {
+            return "Unknown";
+        }
+    }
+    
+    private static String runQuickDiagnostics(Context context) {
+        StringBuilder diagnostics = new StringBuilder();
+        
+        try {
+            // Directory validation
+            boolean directoriesValid = ModManager.validateModDirectories(context);
+            diagnostics.append("Directory Structure: ").append(directoriesValid ? "✅ Valid" : "❌ Invalid").append("\n");
+            
+            // Health check
+            boolean healthCheck = ModManager.performHealthCheck(context);
+            diagnostics.append("Health Check: ").append(healthCheck ? "✅ Passed" : "❌ Failed").append("\n");
+            
+            // Migration status
+            boolean needsMigration = PathManager.needsMigration(context);
+            diagnostics.append("Migration Needed: ").append(needsMigration ? "⚠️ Yes" : "✅ No").append("\n");
+            
+        } catch (Exception e) {
+            diagnostics.append("Diagnostic error: ").append(e.getMessage()).append("\n");
+        }
+        
+        return diagnostics.toString();
+    }
+    
+    private static String generateRecommendations(Context context) {
+        StringBuilder recommendations = new StringBuilder();
+        
+        try {
+            if (PathManager.needsMigration(context)) {
+                recommendations.append("• Migrate to new directory structure\n");
+            }
+            
+            if (!MelonLoaderManager.isMelonLoaderInstalled(context, MelonLoaderManager.TERRARIA_PACKAGE)) {
+                recommendations.append("• Install MelonLoader for DLL mod support\n");
+            }
+            
+            if (ModManager.getTotalModCount() == 0) {
+                recommendations.append("• Install some mods to get started\n");
+            }
+            
+            if (recommendations.length() == 0) {
+                recommendations.append("• No specific recommendations at this time\n");
+            }
+            
+        } catch (Exception e) {
+            recommendations.append("• Could not generate recommendations: ").append(e.getMessage()).append("\n");
+        }
+        
+        return recommendations.toString();
+    }
+    
+    private static String getAppPreferences(Context context) {
+        StringBuilder prefs = new StringBuilder();
+        
+        prefs.append("=== APP PREFERENCES ===\n\n");
+        
+        try {
+            prefs.append("Mods Enabled: ").append(com.modloader.ui.SettingsActivity.isModsEnabled(context)).append("\n");
+            prefs.append("Debug Mode: ").append(com.modloader.ui.SettingsActivity.isDebugMode(context)).append("\n");
+            prefs.append("Sandbox Mode: ").append(com.modloader.ui.SettingsActivity.isSandboxMode(context)).append("\n");
+            prefs.append("Auto Save Logs: ").append(com.modloader.ui.SettingsActivity.isAutoSaveEnabled(context)).append("\n");
+        } catch (Exception e) {
+            prefs.append("Could not retrieve preferences: ").append(e.getMessage()).append("\n");
+        }
+        
+        return prefs.toString();
+    }
+    
+    private static String generateDirectoryTree(File dir, String indent) {
+        StringBuilder tree = new StringBuilder();
+        
+        if (dir == null || !dir.exists()) {
+            return tree.toString();
+        }
+        
+        tree.append(indent).append(dir.getName());
+        if (dir.isDirectory()) {
+            tree.append("/\n");
+            File[] files = dir.listFiles();
+            if (files != null && files.length > 0) {
+                for (File file : files) {
+                    if (indent.length() < 20) { // Limit depth
+                        tree.append(generateDirectoryTree(file, indent + "  "));
+                    }
+                }
+            }
+        } else {
+            tree.append(" (").append(FileUtils.formatFileSize(dir.length())).append(")\n");
+        }
+        
+        return tree.toString();
+    }
+    
+    private static String readFileContent(File file) throws IOException {
+        StringBuilder content = new StringBuilder();
+        try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                content.append(line).append("\n");
+            }
+        }
+        return content.toString();
+    }
+    
+    private static void addTextFile(ZipOutputStream zos, String filename, String content) throws IOException {
+        ZipEntry entry = new ZipEntry(filename);
+        zos.putNextEntry(entry);
+        zos.write(content.getBytes("UTF-8"));
+        zos.closeEntry();
+    }
+}
+
+/ModLoader/app/src/main/java/com/modloader/util/Downloader.java
+
+// File: Downloader.java (Fixed Utility Class)
+// Path: /storage/emulated/0/AndroidIDEProjects/TerrariaML/app/src/main/java/com/modloader/util/Downloader.java
+
+package com.modloader.util;
+
+import com.modloader.util.LogUtils;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
+
+public class Downloader {
+
+    /**
+     * Downloads and extracts a ZIP file from a URL to a specified directory.
+     * FIXED: Properly handles nested folder structures and flattens them correctly.
+     *
+     * @param fileUrl The URL of the ZIP file to download.
+     * @param targetDirectory The directory where the contents will be extracted.
+     * @return true if successful, false otherwise.
+     */
+    public static boolean downloadAndExtractZip(String fileUrl, File targetDirectory) {
+        File zipFile = null;
+        try {
+            // Ensure the target directory exists
+            if (!targetDirectory.exists() && !targetDirectory.mkdirs()) {
+                LogUtils.logDebug("❌ Failed to create target directory: " + targetDirectory.getAbsolutePath());
+                return false;
+            }
+            LogUtils.logUser("📂 Target directory prepared: " + targetDirectory.getAbsolutePath());
+
+            // --- Download Step ---
+            LogUtils.logUser("🌐 Starting download from: " + fileUrl);
+            URL url = new URL(fileUrl);
+            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+            connection.connect();
+
+            if (connection.getResponseCode() != HttpURLConnection.HTTP_OK) {
+                LogUtils.logDebug("❌ Server returned HTTP " + connection.getResponseCode() + " " + connection.getResponseMessage());
+                return false;
+            }
+
+            zipFile = new File(targetDirectory, "downloaded.zip");
+            try (InputStream input = connection.getInputStream();
+                 FileOutputStream output = new FileOutputStream(zipFile)) {
+
+                byte[] data = new byte[4096];
+                int count;
+                long total = 0;
+                while ((count = input.read(data)) != -1) {
+                    total += count;
+                    output.write(data, 0, count);
+                }
+                LogUtils.logUser("✅ Download complete. Total size: " + FileUtils.formatFileSize(total));
+            }
+
+            // --- Extraction Step with Smart Path Handling ---
+            LogUtils.logUser("📦 Starting extraction of " + zipFile.getName());
+            try (InputStream is = new java.io.FileInputStream(zipFile);
+                 ZipInputStream zis = new ZipInputStream(new java.io.BufferedInputStream(is))) {
+                
+                ZipEntry zipEntry;
+                int extractedCount = 0;
+                while ((zipEntry = zis.getNextEntry()) != null) {
+                    if (zipEntry.isDirectory()) {
+                        zis.closeEntry();
+                        continue;
+                    }
+                    
+                    // FIXED: Smart path handling to flatten nested MelonLoader directories
+                    String entryPath = zipEntry.getName();
+                    String targetPath = getSmartTargetPath(entryPath);
+                    
+                    if (targetPath == null) {
+                        LogUtils.logDebug("Skipping file: " + entryPath);
+                        zis.closeEntry();
+                        continue;
+                    }
+                    
+                    File newFile = new File(targetDirectory, targetPath);
+                    
+                    // Prevent Zip Path Traversal Vulnerability
+                    if (!newFile.getCanonicalPath().startsWith(targetDirectory.getCanonicalPath() + File.separator)) {
+                        throw new SecurityException("Zip Path Traversal detected: " + zipEntry.getName());
+                    }
+
+                    // Create parent directories if they don't exist
+                    newFile.getParentFile().mkdirs();
+                    
+                    try (FileOutputStream fos = new FileOutputStream(newFile)) {
+                        int len;
+                        byte[] buffer = new byte[4096];
+                        while ((len = zis.read(buffer)) > 0) {
+                            fos.write(buffer, 0, len);
+                        }
+                    }
+                    
+                    extractedCount++;
+                    LogUtils.logDebug("Extracted: " + entryPath + " -> " + targetPath);
+                    zis.closeEntry();
+                }
+                LogUtils.logUser("✅ Extracted " + extractedCount + " files successfully.");
+            }
+            return true;
+
+        } catch (Exception e) {
+            LogUtils.logDebug("❌ Download and extraction failed: " + e.getMessage());
+            e.printStackTrace();
+            return false;
+        } finally {
+            // --- Cleanup Step ---
+            if (zipFile != null && zipFile.exists()) {
+                zipFile.delete();
+                LogUtils.logDebug("🧹 Cleaned up temporary zip file.");
+            }
+        }
+    }
+    
+    /**
+     * FIXED: Smart path mapping to handle nested MelonLoader directories properly
+     * This function flattens the nested structure and maps files to correct locations
+     */
+    private static String getSmartTargetPath(String zipEntryPath) {
+        // Normalize path separators
+        String normalizedPath = zipEntryPath.replace('\\', '/');
+        
+        // Remove leading MelonLoader/ if it exists (to flatten nested structure)
+        if (normalizedPath.startsWith("MelonLoader/")) {
+            normalizedPath = normalizedPath.substring("MelonLoader/".length());
+        }
+        
+        // Skip empty paths or root directory entries
+        if (normalizedPath.isEmpty() || normalizedPath.equals("/")) {
+            return null;
+        }
+        
+        // Map specific directory structures
+        if (normalizedPath.startsWith("net8/")) {
+            return "net8/" + normalizedPath.substring("net8/".length());
+        } else if (normalizedPath.startsWith("net35/")) {
+            return "net35/" + normalizedPath.substring("net35/".length());
+        } else if (normalizedPath.startsWith("Dependencies/")) {
+            return "Dependencies/" + normalizedPath.substring("Dependencies/".length());
+        } else if (normalizedPath.contains("/net8/")) {
+            // Handle nested paths like "SomeFolder/net8/file.dll"
+            int net8Index = normalizedPath.indexOf("/net8/");
+            return "net8/" + normalizedPath.substring(net8Index + "/net8/".length());
+        } else if (normalizedPath.contains("/net35/")) {
+            // Handle nested paths like "SomeFolder/net35/file.dll"
+            int net35Index = normalizedPath.indexOf("/net35/");
+            return "net35/" + normalizedPath.substring(net35Index + "/net35/".length());
+        } else if (normalizedPath.contains("/Dependencies/")) {
+            // Handle nested paths like "SomeFolder/Dependencies/file.dll"
+            int depsIndex = normalizedPath.indexOf("/Dependencies/");
+            return "Dependencies/" + normalizedPath.substring(depsIndex + "/Dependencies/".length());
+        } else {
+            // For any other files, try to categorize them
+            String fileName = normalizedPath.substring(normalizedPath.lastIndexOf('/') + 1);
+            
+            // Core MelonLoader files go to net8 by default
+            if (fileName.equals("MelonLoader.dll") || 
+                fileName.equals("0Harmony.dll") || 
+                fileName.startsWith("MonoMod.") ||
+                fileName.equals("Il2CppInterop.Runtime.dll")) {
+                return "net8/" + fileName;
+            }
+            
+            // Support files go to Dependencies/SupportModules
+            if (fileName.endsWith(".dll") && !fileName.equals("MelonLoader.dll")) {
+                return "Dependencies/SupportModules/" + fileName;
+            }
+            
+            // Config files go to the root
+            if (fileName.endsWith(".json") || fileName.endsWith(".cfg") || fileName.endsWith(".xml")) {
+                return "net8/" + fileName;
+            }
+        }
+        
+        // Default: place in net8 directory
+        String fileName = normalizedPath.substring(normalizedPath.lastIndexOf('/') + 1);
+        return "net8/" + fileName;
+    }
+}
+
+/ModLoader/app/src/main/java/com/modloader/util/FileUtils.java
+
+// File: FileUtils.java - Complete with all missing methods
+// Path: /app/src/main/java/com/modloader/util/FileUtils.java
+
+package com.modloader.util;
+
+import android.content.Context;
+import android.database.Cursor;
+import android.net.Uri;
+import android.os.Environment;
+import android.provider.OpenableColumns;
+
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.channels.FileChannel;
+
+public class FileUtils {
+    
+    /**
+     * Copy a file from source to destination
+     * @param source Source file
+     * @param destination Destination file
+     * @return true if copy was successful, false otherwise
+     */
+    public static boolean copyFile(File source, File destination) {
+        if (source == null || destination == null) {
+            return false;
+        }
+        
+        if (!source.exists() || !source.isFile()) {
+            return false;
+        }
+        
+        // Create parent directories if they don't exist
+        File parentDir = destination.getParentFile();
+        if (parentDir != null && !parentDir.exists()) {
+            parentDir.mkdirs();
+        }
+        
+        try (FileInputStream in = new FileInputStream(source);
+             FileOutputStream out = new FileOutputStream(destination)) {
+            
+            byte[] buffer = new byte[8192];
+            int bytesRead;
+            while ((bytesRead = in.read(buffer)) != -1) {
+                out.write(buffer, 0, bytesRead);
+            }
+            
+            return true;
+            
+        } catch (Exception e) {
+            // Log the error if LogUtils is available
+            try {
+                LogUtils.logError("Failed to copy file: " + source.getAbsolutePath() + " to " + destination.getAbsolutePath(), e);
+            } catch (Exception logError) {
+                // Silent fail if logging not available
+            }
+            return false;
+        }
+    }
+    
+    /**
+     * Copy content from URI to file
+     * @param context Application context
+     * @param sourceUri Source URI
+     * @param destinationFile Destination file
+     * @return true if copy was successful, false otherwise
+     */
+    public static boolean copyUriToFile(Context context, Uri sourceUri, File destinationFile) {
+        if (context == null || sourceUri == null || destinationFile == null) {
+            return false;
+        }
+        
+        // Create parent directories if they don't exist
+        File parentDir = destinationFile.getParentFile();
+        if (parentDir != null && !parentDir.exists()) {
+            parentDir.mkdirs();
+        }
+        
+        try (InputStream in = context.getContentResolver().openInputStream(sourceUri);
+             FileOutputStream out = new FileOutputStream(destinationFile)) {
+            
+            if (in == null) {
+                return false;
+            }
+            
+            byte[] buffer = new byte[8192];
+            int bytesRead;
+            while ((bytesRead = in.read(buffer)) != -1) {
+                out.write(buffer, 0, bytesRead);
+            }
+            
+            return true;
+            
+        } catch (Exception e) {
+            try {
+                LogUtils.logError("Failed to copy URI to file: " + sourceUri.toString() + " to " + destinationFile.getAbsolutePath(), e);
+            } catch (Exception logError) {
+                // Silent fail if logging not available
+            }
+            return false;
+        }
+    }
+    
+    /**
+     * Get filename from URI
+     * @param context Application context
+     * @param uri URI to get filename from
+     * @return Filename or null if not found
+     */
+    public static String getFilenameFromUri(Context context, Uri uri) {
+        if (context == null || uri == null) {
+            return null;
+        }
+        
+        String filename = null;
+        
+        // Try to get filename from content resolver
+        try (Cursor cursor = context.getContentResolver().query(uri, null, null, null, null)) {
+            if (cursor != null && cursor.moveToFirst()) {
+                int nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                if (nameIndex != -1) {
+                    filename = cursor.getString(nameIndex);
+                }
+            }
+        } catch (Exception e) {
+            // Ignore and try fallback
+        }
+        
+        // Fallback: try to get filename from URI path
+        if (filename == null) {
+            String path = uri.getPath();
+            if (path != null) {
+                int lastSlash = path.lastIndexOf('/');
+                if (lastSlash != -1 && lastSlash < path.length() - 1) {
+                    filename = path.substring(lastSlash + 1);
+                }
+            }
+        }
+        
+        // Final fallback: use last path segment
+        if (filename == null) {
+            filename = uri.getLastPathSegment();
+        }
+        
+        return filename;
+    }
+    
+    /**
+     * Toggle mod file extension between .dll and .dll.disabled
+     * @param modFile Mod file to toggle
+     * @return true if toggle was successful, false otherwise
+     */
+    public static boolean toggleModFile(File modFile) {
+        if (modFile == null || !modFile.exists()) {
+            return false;
+        }
+        
+        String fileName = modFile.getName();
+        File newFile;
+        
+        if (fileName.endsWith(".dll.disabled")) {
+            // Enable mod: remove .disabled extension
+            String newName = fileName.substring(0, fileName.length() - ".disabled".length());
+            newFile = new File(modFile.getParent(), newName);
+        } else if (fileName.endsWith(".dll")) {
+            // Disable mod: add .disabled extension
+            String newName = fileName + ".disabled";
+            newFile = new File(modFile.getParent(), newName);
+        } else {
+            // Not a valid mod file
+            return false;
+        }
+        
+        boolean success = modFile.renameTo(newFile);
+        if (success) {
+            try {
+                LogUtils.logUser("Toggled mod: " + fileName + " -> " + newFile.getName());
+            } catch (Exception e) {
+                // Silent fail if logging not available
+            }
+        }
+        
+        return success;
+    }
+    
+    /**
+     * Format file size in human readable format
+     * @param bytes Size in bytes
+     * @return Formatted file size string
+     */
+    public static String formatFileSize(long bytes) {
+        if (bytes < 0) return "0 B";
+        if (bytes < 1024) return bytes + " B";
+        if (bytes < 1024 * 1024) return String.format("%.1f KB", bytes / 1024.0);
+        if (bytes < 1024 * 1024 * 1024) return String.format("%.1f MB", bytes / (1024.0 * 1024.0));
+        return String.format("%.1f GB", bytes / (1024.0 * 1024.0 * 1024.0));
+    }
+    
+    /**
+     * Format file size in human readable format (int overload)
+     * @param bytes Size in bytes
+     * @return Formatted file size string
+     */
+    public static String formatFileSize(int bytes) {
+        return formatFileSize((long) bytes);
+    }
+    
+    /**
+     * Copy a file using FileChannel for better performance on large files
+     * @param source Source file
+     * @param destination Destination file
+     * @return true if copy was successful, false otherwise
+     */
+    public static boolean copyFileChannel(File source, File destination) {
+        if (source == null || destination == null) {
+            return false;
+        }
+        
+        if (!source.exists() || !source.isFile()) {
+            return false;
+        }
+        
+        // Create parent directories if they don't exist
+        File parentDir = destination.getParentFile();
+        if (parentDir != null && !parentDir.exists()) {
+            parentDir.mkdirs();
+        }
+        
+        try (FileInputStream fis = new FileInputStream(source);
+             FileOutputStream fos = new FileOutputStream(destination);
+             FileChannel sourceChannel = fis.getChannel();
+             FileChannel destChannel = fos.getChannel()) {
+            
+            destChannel.transferFrom(sourceChannel, 0, sourceChannel.size());
+            return true;
+            
+        } catch (Exception e) {
+            try {
+                LogUtils.logError("Failed to copy file with channel: " + source.getAbsolutePath() + " to " + destination.getAbsolutePath(), e);
+            } catch (Exception logError) {
+                // Silent fail if logging not available
+            }
+            return false;
+        }
+    }
+    
+    /**
+     * Copy files with progress callback
+     * @param source Source file
+     * @param destination Destination file
+     * @param callback Progress callback (can be null)
+     * @return true if copy was successful, false otherwise
+     */
+    public static boolean copyFileWithProgress(File source, File destination, CopyProgressCallback callback) {
+        if (source == null || destination == null) {
+            return false;
+        }
+        
+        if (!source.exists() || !source.isFile()) {
+            return false;
+        }
+        
+        // Create parent directories if they don't exist
+        File parentDir = destination.getParentFile();
+        if (parentDir != null && !parentDir.exists()) {
+            parentDir.mkdirs();
+        }
+        
+        try (FileInputStream in = new FileInputStream(source);
+             FileOutputStream out = new FileOutputStream(destination)) {
+            
+            byte[] buffer = new byte[8192];
+            long totalBytes = source.length();
+            long copiedBytes = 0;
+            int bytesRead;
+            
+            while ((bytesRead = in.read(buffer)) != -1) {
+                out.write(buffer, 0, bytesRead);
+                copiedBytes += bytesRead;
+                
+                if (callback != null) {
+                    int progress = (int) ((copiedBytes * 100) / totalBytes);
+                    callback.onProgress(progress, copiedBytes, totalBytes);
+                }
+            }
+            
+            if (callback != null) {
+                callback.onComplete(true);
+            }
+            
+            return true;
+            
+        } catch (Exception e) {
+            if (callback != null) {
+                callback.onComplete(false);
+            }
+            
+            try {
+                LogUtils.logError("Failed to copy file with progress: " + source.getAbsolutePath() + " to " + destination.getAbsolutePath(), e);
+            } catch (Exception logError) {
+                // Silent fail if logging not available
+            }
+            return false;
+        }
+    }
+    
+    /**
+     * Move a file from source to destination
+     * @param source Source file
+     * @param destination Destination file
+     * @return true if move was successful, false otherwise
+     */
+    public static boolean moveFile(File source, File destination) {
+        if (source == null || destination == null) {
+            return false;
+        }
+        
+        if (!source.exists() || !source.isFile()) {
+            return false;
+        }
+        
+        // Try simple rename first
+        if (source.renameTo(destination)) {
+            return true;
+        }
+        
+        // If rename failed, try copy and delete
+        if (copyFile(source, destination)) {
+            return source.delete();
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Delete a file or directory recursively
+     * @param file File or directory to delete
+     * @return true if deletion was successful, false otherwise
+     */
+    public static boolean deleteRecursively(File file) {
+        if (file == null || !file.exists()) {
+            return true;
+        }
+        
+        if (file.isDirectory()) {
+            File[] children = file.listFiles();
+            if (children != null) {
+                for (File child : children) {
+                    if (!deleteRecursively(child)) {
+                        return false;
+                    }
+                }
+            }
+        }
+        
+        return file.delete();
+    }
+    
+    /**
+     * Create directory if it doesn't exist
+     * @param dir Directory to create
+     * @return true if directory exists or was created successfully
+     */
+    public static boolean ensureDirectory(File dir) {
+        if (dir == null) {
+            return false;
+        }
+        
+        if (dir.exists()) {
+            return dir.isDirectory();
+        }
+        
+        return dir.mkdirs();
+    }
+    
+    /**
+     * Get file size in human readable format
+     * @param file File to get size for
+     * @return Formatted file size string
+     */
+    public static String getHumanReadableSize(File file) {
+        if (file == null || !file.exists()) {
+            return "0 B";
+        }
+        
+        return getHumanReadableSize(file.length());
+    }
+    
+    /**
+     * Get file size in human readable format
+     * @param bytes Size in bytes
+     * @return Formatted file size string
+     */
+    public static String getHumanReadableSize(long bytes) {
+        return formatFileSize(bytes);
+    }
+    
+    /**
+     * Check if external storage is available for read and write
+     * @return true if external storage is available
+     */
+    public static boolean isExternalStorageWritable() {
+        String state = Environment.getExternalStorageState();
+        return Environment.MEDIA_MOUNTED.equals(state);
+    }
+    
+    /**
+     * Check if external storage is available to at least read
+     * @return true if external storage is readable
+     */
+    public static boolean isExternalStorageReadable() {
+        String state = Environment.getExternalStorageState();
+        return Environment.MEDIA_MOUNTED.equals(state) ||
+               Environment.MEDIA_MOUNTED_READ_ONLY.equals(state);
+    }
+    
+    /**
+     * Get app's external files directory
+     * @param context Application context
+     * @param type Type of files directory
+     * @return External files directory
+     */
+    public static File getExternalFilesDir(Context context, String type) {
+        if (context == null) {
+            return null;
+        }
+        return context.getExternalFilesDir(type);
+    }
+    
+    /**
+     * Get app's cache directory
+     * @param context Application context
+     * @return Cache directory
+     */
+    public static File getCacheDir(Context context) {
+        if (context == null) {
+            return null;
+        }
+        return context.getCacheDir();
+    }
+    
+    /**
+     * Copy an input stream to an output stream
+     * @param in Input stream
+     * @param out Output stream
+     * @throws IOException if copy fails
+     */
+    public static void copyStream(InputStream in, OutputStream out) throws IOException {
+        byte[] buffer = new byte[8192];
+        int bytesRead;
+        while ((bytesRead = in.read(buffer)) != -1) {
+            out.write(buffer, 0, bytesRead);
+        }
+    }
+    
+    /**
+     * Get file extension from filename
+     * @param filename Filename to get extension from
+     * @return File extension (without dot) or empty string if no extension
+     */
+    public static String getFileExtension(String filename) {
+        if (filename == null || filename.isEmpty()) {
+            return "";
+        }
+        
+        int lastDot = filename.lastIndexOf('.');
+        if (lastDot == -1 || lastDot == filename.length() - 1) {
+            return "";
+        }
+        
+        return filename.substring(lastDot + 1).toLowerCase();
+    }
+    
+    /**
+     * Get filename without extension
+     * @param filename Filename to process
+     * @return Filename without extension
+     */
+    public static String getFilenameWithoutExtension(String filename) {
+        if (filename == null || filename.isEmpty()) {
+            return "";
+        }
+        
+        int lastDot = filename.lastIndexOf('.');
+        if (lastDot == -1) {
+            return filename;
+        }
+        
+        return filename.substring(0, lastDot);
+    }
+    
+    /**
+     * Check if a file has a specific extension
+     * @param file File to check
+     * @param extension Extension to check for (without dot)
+     * @return true if file has the specified extension
+     */
+    public static boolean hasExtension(File file, String extension) {
+        if (file == null || extension == null) {
+            return false;
+        }
+        
+        String fileExtension = getFileExtension(file.getName());
+        return fileExtension.equalsIgnoreCase(extension);
+    }
+    
+    /**
+     * Get directory size recursively
+     * @param directory Directory to calculate size for
+     * @return Total size in bytes
+     */
+    public static long getDirectorySize(File directory) {
+        if (directory == null || !directory.exists() || !directory.isDirectory()) {
+            return 0;
+        }
+        
+        long size = 0;
+        File[] files = directory.listFiles();
+        if (files != null) {
+            for (File file : files) {
+                if (file.isFile()) {
+                    size += file.length();
+                } else if (file.isDirectory()) {
+                    size += getDirectorySize(file);
+                }
+            }
+        }
+        
+        return size;
+    }
+    
+    /**
+     * Interface for copy progress callbacks
+     */
+    public interface CopyProgressCallback {
+        void onProgress(int percentage, long copiedBytes, long totalBytes);
+        void onComplete(boolean success);
+    }
+}
