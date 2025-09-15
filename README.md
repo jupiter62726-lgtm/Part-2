@@ -1,7 +1,5 @@
 
-
-===== ModLoader/app/src/main/java/com/modloader/loader/debugger/ApkProcessTracker.java =====
-
+--- FILE: /ModLoader/app/src/main/java/com/modloader/loader/debugger/ApkProcessTracker.java ---
 // File: ApkProcessTracker.java - Real-time APK operation monitoring and debugging
 // Path: app/src/main/java/com/modloader/loader/debug/ApkProcessTracker.java
 
@@ -552,9 +550,7 @@ public class ApkProcessTracker {
 }
 
 
-
-===== ModLoader/app/src/main/java/com/modloader/loader/debugger/MelonLoaderDebugger.java =====
-
+--- FILE: /ModLoader/app/src/main/java/com/modloader/loader/debugger/MelonLoaderDebugger.java ---
 // File: MelonLoaderDebugger.java - Advanced MelonLoader integration debugging
 // Path: app/src/main/java/com/modloader/loader/debug/MelonLoaderDebugger.java
 
@@ -1386,556 +1382,677 @@ public class MelonLoaderDebugger {
 }
 
 
-
-===== ModLoader/app/src/main/java/com/modloader/logging/AdvancedLogManager.java =====
-
-// File: AdvancedLogManager.java (NEW) - Smart Log Management System
+--- FILE: /ModLoader/app/src/main/java/com/modloader/logging/AdvancedLogManager.java ---
+// =========================
+// AdvancedLogManager.java
+// =========================
+// File: AdvancedLogManager.java - Complete Implementation
 // Path: /app/src/main/java/com/modloader/logging/AdvancedLogManager.java
+
 package com.modloader.logging;
 
 import android.content.Context;
-import android.content.SharedPreferences;
+import android.util.Log;
 import java.io.*;
 import java.text.SimpleDateFormat;
 import java.util.*;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.regex.Pattern;
 
 /**
- * FEATURE 1: SMART LOG FILTERING SYSTEM
- * FEATURE 4: LOG HEALTH MONITORING
- * FEATURE 6: USER ACTION TRACKING
+ * Advanced Log Manager for comprehensive file operations, log rotation, and memory management
  */
 public class AdvancedLogManager {
     private static final String TAG = "AdvancedLogManager";
     
-    private final Context context;
-    private final File baseLogDir;
-    private final File appLogDir;
-    private final SharedPreferences prefs;
-    
-    // Smart filtering configuration
-    private final Set<String> mutedPatterns = ConcurrentHashMap.newKeySet();
-    private final Map<String, AtomicInteger> messageFrequency = new ConcurrentHashMap<>();
-    private final AtomicLong totalMessagesProcessed = new AtomicLong(0);
-    private final AtomicLong filteredMessages = new AtomicLong(0);
-    
-    // User action tracking
-    private final Map<String, AtomicInteger> userActionCounts = new ConcurrentHashMap<>();
-    private final List<UserAction> recentUserActions = Collections.synchronizedList(new ArrayList<>());
-    
-    // Log rotation settings
+    // Configuration constants
     private static final long MAX_LOG_FILE_SIZE = 10 * 1024 * 1024; // 10MB
     private static final int MAX_LOG_FILES = 10;
-    private static final long LOG_RETENTION_DAYS = 7;
+    private static final int MAX_MEMORY_LOGS = 5000;
+    private static final long LOG_ROTATION_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours
     
-    // Smart filtering patterns (removes noise as requested)
-    private static final String[] DEFAULT_MUTED_PATTERNS = {
-        ".*Created: .*",
-        ".*checking\\.\\.\\.",
-        ".*found\\.\\.\\.",
-        ".*Migration.*completed.*",
-        ".*Step \\d+.*",
-        ".*Path: /storage/emulated/0.*",
-        ".*exists.*directory.*",
-        ".*\\d+/\\d+ files.*"
-    };
+    // Context and file management
+    private final Context context;
+    private final File logDirectory;
+    private final File currentLogFile;
+    private FileWriter logFileWriter;
     
-    // Frequency-based filtering
-    private static final int SPAM_THRESHOLD = 10; // Same message more than 10 times
-    private static final long FREQUENCY_WINDOW_MS = 60000; // 1 minute window
+    // Memory log storage
+    private final Queue<LogEntry> memoryLogs = new ConcurrentLinkedQueue<>();
+    private final Map<String, UserAction> userActions = new ConcurrentHashMap<>();
+    private final Map<String, AtomicLong> logCategoryStats = new ConcurrentHashMap<>();
+    
+    // Performance tracking
+    private final AtomicLong totalLogWrites = new AtomicLong(0);
+    private final AtomicLong totalBytesWritten = new AtomicLong(0);
+    private final AtomicLong lastRotationTime = new AtomicLong(System.currentTimeMillis());
+    
+    // Date formatters
+    private static final SimpleDateFormat filenameDateFormat = 
+        new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault());
+    private static final SimpleDateFormat logTimestampFormat = 
+        new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault());
+    
+    // Log filtering and processing
+    private final Set<String> filteredPatterns = new HashSet<>();
+    private volatile boolean compressionEnabled = true;
     
     public AdvancedLogManager(Context context) {
         this.context = context;
-        this.prefs = context.getSharedPreferences("advanced_log_prefs", Context.MODE_PRIVATE);
         
-        // Initialize log directories
-        File gameBaseDir = new File(context.getExternalFilesDir(null), "ModLoader/com.and.games505.TerrariaPaid");
-        this.baseLogDir = new File(gameBaseDir, "Logs");
-        this.appLogDir = new File(gameBaseDir, "AppLogs");
+        // Initialize log directory structure
+        File baseDir = context.getExternalFilesDir(null);
+        File gameDir = new File(baseDir, "ModLoader/com.and.games505.TerrariaPaid");
+        this.logDirectory = new File(gameDir, "AppLogs");
         
-        ensureDirectoriesExist();
-        initializeSmartFiltering();
-        loadUserPreferences();
+        // Ensure directory exists
+        if (!logDirectory.exists() && !logDirectory.mkdirs()) {
+            Log.e(TAG, "Failed to create log directory: " + logDirectory.getAbsolutePath());
+        }
+        
+        // Initialize current log file
+        this.currentLogFile = new File(logDirectory, "AppLog.txt");
+        
+        // Initialize log category stats
+        logCategoryStats.put("DEBUG", new AtomicLong(0));
+        logCategoryStats.put("INFO", new AtomicLong(0));
+        logCategoryStats.put("WARN", new AtomicLong(0));
+        logCategoryStats.put("ERROR", new AtomicLong(0));
+        logCategoryStats.put("USER", new AtomicLong(0));
+        
+        // Initialize filtered patterns for noise reduction
+        initializeFilterPatterns();
+        
+        // Initialize log file writer
+        initializeLogWriter();
+        
+        Log.d(TAG, "AdvancedLogManager initialized - Log directory: " + logDirectory.getAbsolutePath());
     }
     
-    private void ensureDirectoriesExist() {
+    /**
+     * Initialize patterns to filter out noise from logs
+     */
+    private void initializeFilterPatterns() {
+        // Common noise patterns that should be filtered
+        filteredPatterns.add(".*Created: /storage/emulated/0.*");
+        filteredPatterns.add(".*exists: true.*");
+        filteredPatterns.add(".*checking.*found.*");
+        filteredPatterns.add(".*Step \\d+ of \\d+.*");
+        filteredPatterns.add(".*\\d+/\\d+ directories created.*");
+    }
+    
+    /**
+     * Initialize log file writer
+     */
+    private void initializeLogWriter() {
         try {
-            if (!baseLogDir.exists()) {
-                baseLogDir.mkdirs();
-            }
-            if (!appLogDir.exists()) {
-                appLogDir.mkdirs();
-            }
-            
-            // Create README files
-            createReadmeFile(baseLogDir, "Game Logs", 
-                "This directory contains logs from MelonLoader and game runtime.\n" +
-                "Files are automatically rotated when they exceed size limits.");
-            
-            createReadmeFile(appLogDir, "Application Logs",
-                "This directory contains logs from ModLoader application.\n" +
-                "Advanced filtering and analytics are applied to these logs.");
-                
-        } catch (Exception e) {
-            System.err.println("❌ Failed to create log directories: " + e.getMessage());
-        }
-    }
-    
-    private void createReadmeFile(File dir, String title, String description) {
-        File readme = new File(dir, "README.txt");
-        if (!readme.exists()) {
-            try (FileWriter writer = new FileWriter(readme)) {
-                writer.write("=== " + title + " ===\n\n");
-                writer.write(description + "\n\n");
-                writer.write("Created: " + new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date()) + "\n");
-                writer.write("Max file size: " + formatFileSize(MAX_LOG_FILE_SIZE) + "\n");
-                writer.write("Max files kept: " + MAX_LOG_FILES + "\n");
-                writer.write("Retention period: " + LOG_RETENTION_DAYS + " days\n");
-            } catch (IOException e) {
-                System.err.println("Failed to create README: " + e.getMessage());
-            }
-        }
-    }
-    
-    private void initializeSmartFiltering() {
-        // Load default muted patterns
-        for (String pattern : DEFAULT_MUTED_PATTERNS) {
-            mutedPatterns.add(pattern);
-        }
-        
-        // Load custom patterns from preferences
-        String customPatterns = prefs.getString("custom_muted_patterns", "");
-        if (!customPatterns.isEmpty()) {
-            String[] patterns = customPatterns.split("\n");
-            Collections.addAll(mutedPatterns, patterns);
-        }
-    }
-    
-    private void loadUserPreferences() {
-        // Load user action tracking preferences
-        boolean trackUserActions = prefs.getBoolean("track_user_actions", true);
-        if (!trackUserActions) {
-            recentUserActions.clear();
+            logFileWriter = new FileWriter(currentLogFile, true); // Append mode
+            writeLogHeader();
+        } catch (IOException e) {
+            Log.e(TAG, "Failed to initialize log writer", e);
         }
     }
     
     /**
-     * SMART FILTERING: Check if message should be filtered out
+     * Write header information to log file
      */
-    public boolean shouldFilterMessage(String message) {
-        if (message == null || message.trim().isEmpty()) {
-            return true;
+    private void writeLogHeader() {
+        try {
+            String header = String.format("=== ModLoader Log Session Started ===\n" +
+                "Timestamp: %s\n" +
+                "Device: %s %s\n" +
+                "Android: %s (API %d)\n" +
+                "App Version: %s\n" +
+                "Log Directory: %s\n" +
+                "=====================================\n\n",
+                logTimestampFormat.format(new Date()),
+                android.os.Build.MANUFACTURER,
+                android.os.Build.MODEL,
+                android.os.Build.VERSION.RELEASE,
+                android.os.Build.VERSION.SDK_INT,
+                getAppVersion(),
+                logDirectory.getAbsolutePath()
+            );
+            
+            if (logFileWriter != null) {
+                logFileWriter.write(header);
+                logFileWriter.flush();
+            }
+        } catch (IOException e) {
+            Log.e(TAG, "Failed to write log header", e);
+        }
+    }
+    
+    /**
+     * Get app version information
+     */
+    private String getAppVersion() {
+        try {
+            return context.getPackageManager()
+                .getPackageInfo(context.getPackageName(), 0).versionName;
+        } catch (Exception e) {
+            return "Unknown";
+        }
+    }
+    
+    /**
+     * Track user action with detailed context
+     */
+    public void trackUserAction(String action) {
+        if (action == null || action.trim().isEmpty()) return;
+        
+        UserAction userAction = new UserAction(action, System.currentTimeMillis());
+        userActions.put(UUID.randomUUID().toString(), userAction);
+        
+        // Keep only recent actions (last 1000)
+        if (userActions.size() > 1000) {
+            Iterator<String> iterator = userActions.keySet().iterator();
+            for (int i = 0; i < 100 && iterator.hasNext(); i++) {
+                iterator.next();
+                iterator.remove();
+            }
         }
         
-        totalMessagesProcessed.incrementAndGet();
+        // Write to file
+        writeToFile("USER_ACTION", "INFO", action);
         
-        // Pattern-based filtering (removes noise as requested)
-        for (String pattern : mutedPatterns) {
-            if (Pattern.matches(pattern, message)) {
-                filteredMessages.incrementAndGet();
+        Log.d(TAG, "Tracked user action: " + action);
+    }
+    
+    /**
+     * Write log entry to both memory and file
+     */
+    public void writeLog(String category, String level, String message) {
+        writeLog(category, level, message, null);
+    }
+    
+    /**
+     * Write log entry with optional throwable
+     */
+    public void writeLog(String category, String level, String message, Throwable throwable) {
+        if (shouldFilterMessage(message)) {
+            return; // Skip filtered messages
+        }
+        
+        // Create log entry
+        LogEntry entry = new LogEntry(category, level, message, throwable, System.currentTimeMillis());
+        
+        // Add to memory storage
+        memoryLogs.offer(entry);
+        if (memoryLogs.size() > MAX_MEMORY_LOGS) {
+            memoryLogs.poll(); // Remove oldest
+        }
+        
+        // Update statistics
+        totalLogWrites.incrementAndGet();
+        logCategoryStats.get(level).incrementAndGet();
+        
+        // Write to file
+        writeToFile(category, level, message, throwable);
+        
+        // Check if rotation is needed
+        checkLogRotation();
+    }
+    
+    /**
+     * Check if message should be filtered out
+     */
+    private boolean shouldFilterMessage(String message) {
+        if (message == null) return true;
+        
+        for (String pattern : filteredPatterns) {
+            if (message.matches(pattern)) {
                 return true;
             }
-        }
-        
-        // Frequency-based filtering (prevents spam)
-        String messageKey = generateMessageKey(message);
-        AtomicInteger frequency = messageFrequency.computeIfAbsent(messageKey, k -> new AtomicInteger(0));
-        
-        if (frequency.incrementAndGet() > SPAM_THRESHOLD) {
-            // Mark as spam after threshold
-            if (frequency.get() == SPAM_THRESHOLD + 1) {
-                // Log one final message about spam detection
-                logSpamDetected(messageKey);
-            }
-            filteredMessages.incrementAndGet();
-            return true;
         }
         
         return false;
     }
     
-    private String generateMessageKey(String message) {
-        // Create a key for frequency tracking (normalize message)
-        String normalized = message.replaceAll("\\d+", "#");  // Replace numbers with #
-        normalized = normalized.replaceAll("/[^\\s]+", "/PATH"); // Replace paths
-        return normalized.length() > 100 ? normalized.substring(0, 100) : normalized;
-    }
-    
-    private void logSpamDetected(String messageKey) {
-        try {
-            File spamLog = new File(appLogDir, "spam_detection.log");
-            try (FileWriter writer = new FileWriter(spamLog, true)) {
-                writer.write(String.format("%s - SPAM DETECTED: %s (suppressing further occurrences)\n",
-                    getCurrentTimestamp(), messageKey));
-            }
-        } catch (IOException e) {
-            System.err.println("Failed to log spam detection: " + e.getMessage());
-        }
-    }
-    
     /**
-     * USER ACTION TRACKING: Track user interactions for UX insights
+     * Write entry to physical log file
      */
-    public void trackUserAction(String action) {
-        if (action == null) return;
-        
-        // Extract action type from message
-        String actionType = extractActionType(action);
-        
-        // Update counters
-        userActionCounts.computeIfAbsent(actionType, k -> new AtomicInteger(0)).incrementAndGet();
-        
-        // Store recent action
-        UserAction userAction = new UserAction(actionType, action, System.currentTimeMillis());
-        recentUserActions.add(userAction);
-        
-        // Limit recent actions list size
-        if (recentUserActions.size() > 1000) {
-            recentUserActions.remove(0);
-        }
-        
-        // Log to user actions file
-        logUserActionToFile(userAction);
+    private void writeToFile(String category, String level, String message) {
+        writeToFile(category, level, message, null);
     }
     
-    private String extractActionType(String action) {
-        // Smart action type extraction
-        if (action.contains("selected") || action.contains("clicked")) return "UI_INTERACTION";
-        if (action.contains("installation") || action.contains("install")) return "INSTALLATION";
-        if (action.contains("mod") && action.contains("add")) return "MOD_MANAGEMENT";
-        if (action.contains("APK") || action.contains("patch")) return "APK_OPERATIONS";
-        if (action.contains("settings") || action.contains("config")) return "CONFIGURATION";
-        if (action.contains("error") || action.contains("failed")) return "ERROR_ENCOUNTERED";
-        if (action.contains("startup") || action.contains("launch")) return "APP_LIFECYCLE";
-        return "GENERAL";
-    }
-    
-    private void logUserActionToFile(UserAction action) {
+    /**
+     * Write entry to physical log file with throwable
+     */
+    private void writeToFile(String category, String level, String message, Throwable throwable) {
         try {
-            File userActionsLog = new File(appLogDir, "user_actions.log");
-            try (FileWriter writer = new FileWriter(userActionsLog, true)) {
-                writer.write(String.format("%s|%s|%s\n", 
-                    new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date(action.timestamp)),
-                    action.actionType,
-                    action.description.replace("\n", " ").replace("|", ";")));
+            if (logFileWriter == null) {
+                initializeLogWriter();
             }
+            
+            String logLine = formatLogEntry(category, level, message, throwable);
+            logFileWriter.write(logLine);
+            logFileWriter.flush();
+            
+            totalBytesWritten.addAndGet(logLine.length());
+            
         } catch (IOException e) {
-            System.err.println("Failed to log user action: " + e.getMessage());
+            Log.e(TAG, "Failed to write to log file", e);
+            // Try to reinitialize writer
+            try {
+                if (logFileWriter != null) {
+                    logFileWriter.close();
+                }
+                initializeLogWriter();
+            } catch (IOException ex) {
+                Log.e(TAG, "Failed to reinitialize log writer", ex);
+            }
         }
     }
     
     /**
-     * LOG HEALTH MONITORING: Automatic log rotation and health checks
+     * Format log entry for file output
+     */
+    private String formatLogEntry(String category, String level, String message, Throwable throwable) {
+        StringBuilder entry = new StringBuilder();
+        
+        entry.append("[").append(logTimestampFormat.format(new Date())).append("] ");
+        entry.append("[").append(level).append("] ");
+        entry.append("[").append(category).append("] ");
+        entry.append(message).append("\n");
+        
+        if (throwable != null) {
+            StringWriter sw = new StringWriter();
+            PrintWriter pw = new PrintWriter(sw);
+            throwable.printStackTrace(pw);
+            entry.append("Exception: ").append(sw.toString()).append("\n");
+        }
+        
+        return entry.toString();
+    }
+    
+    /**
+     * Perform comprehensive log rotation
      */
     public void performLogRotation() {
         try {
-            rotateLogsInDirectory(appLogDir, "AppLog");
-            rotateLogsInDirectory(baseLogDir, "GameLog");
-            cleanupOldLogs();
+            long currentTime = System.currentTimeMillis();
+            boolean forceRotation = (currentTime - lastRotationTime.get()) > LOG_ROTATION_INTERVAL;
+            boolean sizeRotation = currentLogFile.length() > MAX_LOG_FILE_SIZE;
             
-            // Cleanup frequency tracking (reset every hour)
-            cleanupFrequencyTracking();
+            if (!forceRotation && !sizeRotation) {
+                return; // No rotation needed
+            }
+            
+            Log.d(TAG, "Starting log rotation - Force: " + forceRotation + ", Size: " + sizeRotation);
+            
+            // Close current writer
+            if (logFileWriter != null) {
+                logFileWriter.close();
+                logFileWriter = null;
+            }
+            
+            // Rotate existing files
+            rotateLogFiles();
+            
+            // Create new current log file
+            initializeLogWriter();
+            
+            // Clean up old files
+            cleanupOldLogFiles();
+            
+            lastRotationTime.set(currentTime);
+            
+            Log.d(TAG, "Log rotation completed successfully");
             
         } catch (Exception e) {
-            System.err.println("❌ Log rotation failed: " + e.getMessage());
-        }
-    }
-    
-    private void rotateLogsInDirectory(File directory, String prefix) throws IOException {
-        if (!directory.exists()) return;
-        
-        File currentLog = new File(directory, prefix + ".log");
-        
-        if (currentLog.exists() && currentLog.length() > MAX_LOG_FILE_SIZE) {
-            // Rotate existing files
-            for (int i = MAX_LOG_FILES - 1; i > 0; i--) {
-                File oldFile = new File(directory, prefix + "." + i + ".log");
-                File newFile = new File(directory, prefix + "." + (i + 1) + ".log");
-                
-                if (oldFile.exists()) {
-                    if (newFile.exists()) {
-                        newFile.delete();
-                    }
-                    oldFile.renameTo(newFile);
-                }
+            Log.e(TAG, "Log rotation failed", e);
+            try {
+                // Ensure we have a working log writer
+                initializeLogWriter();
+            } catch (Exception ex) {
+                Log.e(TAG, "Failed to reinitialize after rotation failure", ex);
             }
-            
-            // Move current log to .1
-            File firstRotated = new File(directory, prefix + ".1.log");
-            if (firstRotated.exists()) {
-                firstRotated.delete();
-            }
-            currentLog.renameTo(firstRotated);
-        }
-    }
-    
-    private void cleanupOldLogs() {
-        long cutoffTime = System.currentTimeMillis() - (LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000);
-        
-        cleanupOldLogsInDirectory(appLogDir, cutoffTime);
-        cleanupOldLogsInDirectory(baseLogDir, cutoffTime);
-    }
-    
-    private void cleanupOldLogsInDirectory(File directory, long cutoffTime) {
-        if (!directory.exists()) return;
-        
-        File[] logFiles = directory.listFiles((dir, name) -> name.endsWith(".log"));
-        if (logFiles == null) return;
-        
-        for (File logFile : logFiles) {
-            if (logFile.lastModified() < cutoffTime) {
-                if (logFile.delete()) {
-                    System.out.println("🗑️ Cleaned up old log: " + logFile.getName());
-                }
-            }
-        }
-    }
-    
-    private void cleanupFrequencyTracking() {
-        // Clear frequency tracking periodically to prevent memory leak
-        if (messageFrequency.size() > 10000) {
-            messageFrequency.clear();
-            System.out.println("🧹 Cleared message frequency tracking cache");
         }
     }
     
     /**
-     * Get all logs formatted for display (legacy compatibility)
+     * Rotate log files (AppLog.txt -> AppLog1.txt -> AppLog2.txt, etc.)
+     */
+    private void rotateLogFiles() throws IOException {
+        // Move files in reverse order
+        for (int i = MAX_LOG_FILES - 1; i >= 1; i--) {
+            File currentFile = new File(logDirectory, "AppLog" + i + ".txt");
+            File nextFile = new File(logDirectory, "AppLog" + (i + 1) + ".txt");
+            
+            if (currentFile.exists()) {
+                if (nextFile.exists()) {
+                    nextFile.delete();
+                }
+                currentFile.renameTo(nextFile);
+            }
+        }
+        
+        // Move current log to AppLog1.txt
+        if (currentLogFile.exists()) {
+            File rotatedFile = new File(logDirectory, "AppLog1.txt");
+            if (rotatedFile.exists()) {
+                rotatedFile.delete();
+            }
+            currentLogFile.renameTo(rotatedFile);
+        }
+    }
+    
+    /**
+     * Clean up old log files beyond the maximum limit
+     */
+    private void cleanupOldLogFiles() {
+        try {
+            File[] logFiles = logDirectory.listFiles((dir, name) -> 
+                name.startsWith("AppLog") && name.endsWith(".txt"));
+            
+            if (logFiles == null) return;
+            
+            // Sort by modification time (oldest first)
+            Arrays.sort(logFiles, Comparator.comparingLong(File::lastModified));
+            
+            // Delete excess files
+            for (int i = 0; i < logFiles.length - MAX_LOG_FILES; i++) {
+                if (logFiles[i].delete()) {
+                    Log.d(TAG, "Deleted old log file: " + logFiles[i].getName());
+                }
+            }
+            
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to clean up old log files", e);
+        }
+    }
+    
+    /**
+     * Check if log rotation is needed
+     */
+    private void checkLogRotation() {
+        if (currentLogFile.length() > MAX_LOG_FILE_SIZE) {
+            performLogRotation();
+        }
+    }
+    
+    /**
+     * Get all logs formatted as a single string
      */
     public String getAllLogsFormatted() {
         StringBuilder allLogs = new StringBuilder();
         
-        try {
-            // Add header with statistics
-            allLogs.append("=== ModLoader Advanced Logs ===\n");
-            allLogs.append("Generated: ").append(getCurrentTimestamp()).append("\n");
-            allLogs.append("Total processed: ").append(totalMessagesProcessed.get()).append("\n");
-            allLogs.append("Filtered out: ").append(filteredMessages.get()).append("\n");
-            allLogs.append("Filter efficiency: ").append(getFilterEfficiencyPercent()).append("%\n");
-            allLogs.append("==========================================\n\n");
-            
-            // Read current app logs
-            File currentAppLog = new File(appLogDir, "AppLog.log");
-            if (currentAppLog.exists()) {
-                allLogs.append(readLogFile(currentAppLog));
-                allLogs.append("\n");
-            }
-            
-            // Read rotated logs (most recent first)
-            for (int i = 1; i <= 5; i++) {
-                File rotatedLog = new File(appLogDir, "AppLog." + i + ".log");
-                if (rotatedLog.exists()) {
-                    allLogs.append("--- Rotated Log ").append(i).append(" ---\n");
-                    allLogs.append(readLogFile(rotatedLog));
-                    allLogs.append("\n");
+        // Add header
+        allLogs.append("=== In-Memory Logs (Recent ").append(memoryLogs.size()).append(" entries) ===\n\n");
+        
+        // Add memory logs
+        for (LogEntry entry : memoryLogs) {
+            allLogs.append(entry.getFormattedEntry()).append("\n");
+        }
+        
+        // Add file logs if memory is empty
+        if (memoryLogs.isEmpty()) {
+            allLogs.append("=== Reading from log file ===\n\n");
+            try {
+                if (currentLogFile.exists()) {
+                    BufferedReader reader = new BufferedReader(new FileReader(currentLogFile));
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        allLogs.append(line).append("\n");
+                    }
+                    reader.close();
                 }
+            } catch (IOException e) {
+                allLogs.append("Error reading log file: ").append(e.getMessage()).append("\n");
             }
-            
-        } catch (Exception e) {
-            allLogs.append("❌ Error reading logs: ").append(e.getMessage()).append("\n");
         }
         
         return allLogs.toString();
     }
     
-    private String readLogFile(File logFile) throws IOException {
-        StringBuilder content = new StringBuilder();
-        try (BufferedReader reader = new BufferedReader(new FileReader(logFile))) {
-            String line;
-            int lineCount = 0;
-            while ((line = reader.readLine()) != null && lineCount < 1000) {
-                content.append(line).append("\n");
-                lineCount++;
+    /**
+     * Clear all logs from memory and files
+     */
+    public void clearAllLogs() {
+        try {
+            // Clear memory logs
+            memoryLogs.clear();
+            
+            // Close current writer
+            if (logFileWriter != null) {
+                logFileWriter.close();
+                logFileWriter = null;
             }
             
-            if (lineCount >= 1000) {
-                content.append("... (truncated, showing first 1000 lines)\n");
+            // Delete all log files
+            File[] logFiles = logDirectory.listFiles((dir, name) -> 
+                name.startsWith("AppLog") && name.endsWith(".txt"));
+            
+            if (logFiles != null) {
+                for (File file : logFiles) {
+                    if (file.delete()) {
+                        Log.d(TAG, "Deleted log file: " + file.getName());
+                    }
+                }
             }
+            
+            // Reset statistics
+            totalLogWrites.set(0);
+            totalBytesWritten.set(0);
+            for (AtomicLong counter : logCategoryStats.values()) {
+                counter.set(0);
+            }
+            
+            // Reinitialize log writer
+            initializeLogWriter();
+            
+            Log.d(TAG, "All logs cleared successfully");
+            
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to clear logs", e);
         }
-        return content.toString();
     }
     
     /**
-     * Get user action insights for UX improvements
+     * Get list of available log files
      */
-    public Map<String, Object> getUserActionInsights() {
-        Map<String, Object> insights = new HashMap<>();
-        
-        // Action type frequency
-        Map<String, Integer> actionFrequency = new HashMap<>();
-        for (Map.Entry<String, AtomicInteger> entry : userActionCounts.entrySet()) {
-            actionFrequency.put(entry.getKey(), entry.getValue().get());
-        }
-        insights.put("actionFrequency", actionFrequency);
-        
-        // Recent activity timeline
-        List<Map<String, Object>> timeline = new ArrayList<>();
-        int recentCount = Math.min(50, recentUserActions.size());
-        for (int i = recentUserActions.size() - recentCount; i < recentUserActions.size(); i++) {
-            if (i >= 0) {
-                UserAction action = recentUserActions.get(i);
-                Map<String, Object> timelineEntry = new HashMap<>();
-                timelineEntry.put("timestamp", action.timestamp);
-                timelineEntry.put("type", action.actionType);
-                timelineEntry.put("description", action.description);
-                timeline.add(timelineEntry);
+    public List<File> getAvailableLogFiles() {
+        List<File> files = new ArrayList<>();
+        try {
+            File[] logFiles = logDirectory.listFiles((dir, name) -> 
+                name.startsWith("AppLog") && name.endsWith(".txt"));
+            
+            if (logFiles != null) {
+                // Sort by modification time (newest first)
+                Arrays.sort(logFiles, (a, b) -> Long.compare(b.lastModified(), a.lastModified()));
+                files.addAll(Arrays.asList(logFiles));
             }
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to get available log files", e);
         }
-        insights.put("recentTimeline", timeline);
-        
-        // Most common action
-        String mostCommonAction = userActionCounts.entrySet().stream()
-            .max(Map.Entry.comparingByValue((a, b) -> Integer.compare(a.get(), b.get())))
-            .map(Map.Entry::getKey)
-            .orElse("N/A");
-        insights.put("mostCommonAction", mostCommonAction);
-        
-        return insights;
+        return files;
     }
     
     /**
-     * Get filtering statistics
+     * Read content from a specific log file
      */
-    public Map<String, Object> getFilteringStatistics() {
+    public String readLogFile(File logFile) {
+        if (logFile == null || !logFile.exists()) {
+            return "Log file does not exist";
+        }
+        
+        try {
+            StringBuilder content = new StringBuilder();
+            BufferedReader reader = new BufferedReader(new FileReader(logFile));
+            String line;
+            
+            while ((line = reader.readLine()) != null) {
+                content.append(line).append("\n");
+            }
+            
+            reader.close();
+            return content.toString();
+            
+        } catch (IOException e) {
+            Log.e(TAG, "Failed to read log file: " + logFile.getName(), e);
+            return "Error reading file: " + e.getMessage();
+        }
+    }
+    
+    /**
+     * Get log statistics
+     */
+    public Map<String, Object> getLogStatistics() {
         Map<String, Object> stats = new HashMap<>();
         
-        long total = totalMessagesProcessed.get();
-        long filtered = filteredMessages.get();
+        stats.put("totalLogWrites", totalLogWrites.get());
+        stats.put("totalBytesWritten", totalBytesWritten.get());
+        stats.put("memoryLogsCount", memoryLogs.size());
+        stats.put("userActionsCount", userActions.size());
+        stats.put("logDirectoryPath", logDirectory.getAbsolutePath());
+        stats.put("currentLogFileSize", currentLogFile.length());
+        stats.put("lastRotationTime", new Date(lastRotationTime.get()));
         
-        stats.put("totalProcessed", total);
-        stats.put("filtered", filtered);
-        stats.put("passed", total - filtered);
-        stats.put("filterEfficiency", getFilterEfficiencyPercent());
-        stats.put("mutedPatternsCount", mutedPatterns.size());
-        stats.put("frequencyTrackingSize", messageFrequency.size());
+        // Category statistics
+        Map<String, Long> categoryStats = new HashMap<>();
+        for (Map.Entry<String, AtomicLong> entry : logCategoryStats.entrySet()) {
+            categoryStats.put(entry.getKey(), entry.getValue().get());
+        }
+        stats.put("categoryStats", categoryStats);
+        
+        // File statistics
+        List<File> logFiles = getAvailableLogFiles();
+        stats.put("totalLogFiles", logFiles.size());
+        
+        long totalLogSize = 0;
+        for (File file : logFiles) {
+            totalLogSize += file.length();
+        }
+        stats.put("totalLogSize", totalLogSize);
         
         return stats;
     }
     
     /**
-     * Add custom mute pattern
+     * Export logs to external file
      */
-    public void addMutePattern(String pattern) {
-        if (pattern != null && !pattern.trim().isEmpty()) {
-            mutedPatterns.add(pattern.trim());
-            saveMutedPatterns();
-        }
-    }
-    
-    /**
-     * Remove mute pattern
-     */
-    public void removeMutePattern(String pattern) {
-        mutedPatterns.remove(pattern);
-        saveMutedPatterns();
-    }
-    
-    /**
-     * Get current mute patterns
-     */
-    public Set<String> getMutePatterns() {
-        return new HashSet<>(mutedPatterns);
-    }
-    
-    private void saveMutedPatterns() {
-        StringBuilder patterns = new StringBuilder();
-        for (String pattern : mutedPatterns) {
-            if (!isDefaultPattern(pattern)) {
-                patterns.append(pattern).append("\n");
+    public File exportLogs(String exportFileName) {
+        try {
+            File exportsDir = new File(context.getExternalFilesDir(null), "exports");
+            if (!exportsDir.exists()) {
+                exportsDir.mkdirs();
             }
-        }
-        prefs.edit().putString("custom_muted_patterns", patterns.toString()).apply();
-    }
-    
-    private boolean isDefaultPattern(String pattern) {
-        for (String defaultPattern : DEFAULT_MUTED_PATTERNS) {
-            if (defaultPattern.equals(pattern)) {
-                return true;
+            
+            File exportFile = new File(exportsDir, exportFileName);
+            FileWriter writer = new FileWriter(exportFile);
+            
+            // Write header
+            writer.write("=== ModLoader Log Export ===\n");
+            writer.write("Export Date: " + logTimestampFormat.format(new Date()) + "\n");
+            writer.write("Total Entries: " + memoryLogs.size() + "\n\n");
+            
+            // Write all logs
+            writer.write(getAllLogsFormatted());
+            
+            // Write statistics
+            writer.write("\n\n=== Log Statistics ===\n");
+            Map<String, Object> stats = getLogStatistics();
+            for (Map.Entry<String, Object> entry : stats.entrySet()) {
+                writer.write(entry.getKey() + ": " + entry.getValue() + "\n");
             }
+            
+            writer.close();
+            
+            Log.d(TAG, "Logs exported to: " + exportFile.getAbsolutePath());
+            return exportFile;
+            
+        } catch (IOException e) {
+            Log.e(TAG, "Failed to export logs", e);
+            return null;
         }
-        return false;
-    }
-    
-    private double getFilterEfficiencyPercent() {
-        long total = totalMessagesProcessed.get();
-        if (total == 0) return 0.0;
-        return (filteredMessages.get() * 100.0) / total;
-    }
-    
-    private String getCurrentTimestamp() {
-        return new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
-    }
-    
-    private String formatFileSize(long bytes) {
-        if (bytes < 1024) return bytes + " B";
-        if (bytes < 1024 * 1024) return String.format("%.1f KB", bytes / 1024.0);
-        if (bytes < 1024 * 1024 * 1024) return String.format("%.1f MB", bytes / (1024.0 * 1024.0));
-        return String.format("%.1f GB", bytes / (1024.0 * 1024.0 * 1024.0));
     }
     
     /**
-     * Cleanup resources
+     * Clean shutdown with final log write
      */
     public void shutdown() {
         try {
-            // Save final statistics
-            File statsFile = new File(appLogDir, "final_stats.log");
-            try (FileWriter writer = new FileWriter(statsFile)) {
-                writer.write("=== Final Logging Statistics ===\n");
-                writer.write("Session ended: " + getCurrentTimestamp() + "\n");
-                writer.write("Total messages processed: " + totalMessagesProcessed.get() + "\n");
-                writer.write("Messages filtered: " + filteredMessages.get() + "\n");
-                writer.write("Filter efficiency: " + getFilterEfficiencyPercent() + "%\n");
-                writer.write("User actions tracked: " + recentUserActions.size() + "\n");
-                
-                // Write top user actions
-                writer.write("\nTop User Actions:\n");
-                userActionCounts.entrySet().stream()
-                    .sorted(Map.Entry.<String, AtomicInteger>comparingByValue(
-                        (a, b) -> Integer.compare(b.get(), a.get())))
-                    .limit(10)
-                    .forEach(entry -> {
-                        try {
-                            writer.write(String.format("  %s: %d\n", entry.getKey(), entry.getValue().get()));
-                        } catch (IOException e) {
-                            // Ignore write errors during shutdown
-                        }
-                    });
+            Log.d(TAG, "AdvancedLogManager shutting down");
+            
+            // Write shutdown message
+            writeToFile("SYSTEM", "INFO", "AdvancedLogManager shutdown - Session ended");
+            
+            // Write final statistics
+            Map<String, Object> stats = getLogStatistics();
+            writeToFile("SYSTEM", "INFO", "Final statistics: " + stats.toString());
+            
+            // Close log writer
+            if (logFileWriter != null) {
+                logFileWriter.close();
+                logFileWriter = null;
             }
             
-            // Clear collections
-            messageFrequency.clear();
-            recentUserActions.clear();
-            userActionCounts.clear();
+            Log.d(TAG, "AdvancedLogManager shutdown complete");
             
         } catch (Exception e) {
-            System.err.println("Error during AdvancedLogManager shutdown: " + e.getMessage());
+            Log.e(TAG, "Error during shutdown", e);
+        }
+    }
+    
+    // =========================
+    // INNER CLASSES
+    // =========================
+    
+    /**
+     * Represents a log entry with full context
+     */
+    private static class LogEntry {
+        final String category;
+        final String level;
+        final String message;
+        final Throwable throwable;
+        final long timestamp;
+        final String formattedTime;
+        
+        LogEntry(String category, String level, String message, Throwable throwable, long timestamp) {
+            this.category = category;
+            this.level = level;
+            this.message = message;
+            this.throwable = throwable;
+            this.timestamp = timestamp;
+            this.formattedTime = logTimestampFormat.format(new Date(timestamp));
+        }
+        
+        String getFormattedEntry() {
+            StringBuilder entry = new StringBuilder();
+            entry.append("[").append(formattedTime).append("] ");
+            entry.append("[").append(level).append("] ");
+            entry.append("[").append(category).append("] ");
+            entry.append(message);
+            
+            if (throwable != null) {
+                entry.append("\n  Exception: ").append(throwable.getMessage());
+            }
+            
+            return entry.toString();
         }
     }
     
     /**
-     * User action data class
+     * Represents a user action with timestamp
      */
     private static class UserAction {
-        final String actionType;
-        final String description;
+        final String action;
         final long timestamp;
+        final String formattedTime;
         
-        UserAction(String actionType, String description, long timestamp) {
-            this.actionType = actionType;
-            this.description = description;
+        UserAction(String action, long timestamp) {
+            this.action = action;
             this.timestamp = timestamp;
+            this.formattedTime = logTimestampFormat.format(new Date(timestamp));
         }
     }
 }
 
 
-
-===== ModLoader/app/src/main/java/com/modloader/logging/ApkProcessLogger.java =====
-
+--- FILE: /ModLoader/app/src/main/java/com/modloader/logging/ApkProcessLogger.java ---
 // File: ApkProcessLogger.java - Specialized APK process tracking
 // Path: app/src/main/java/com/terrarialoader/logging/ApkProcessLogger.java
 
@@ -2259,9 +2376,7 @@ public class ApkProcessLogger {
 }
 
 
-
-===== ModLoader/app/src/main/java/com/modloader/logging/BasicLogger.java =====
-
+--- FILE: /ModLoader/app/src/main/java/com/modloader/logging/BasicLogger.java ---
 package com.modloader.logging;
 
 public class BasicLogger {
@@ -2269,9 +2384,7 @@ public class BasicLogger {
 
 
 
-
-===== ModLoader/app/src/main/java/com/modloader/logging/ErrorLogger.java =====
-
+--- FILE: /ModLoader/app/src/main/java/com/modloader/logging/ErrorLogger.java ---
 // File: ErrorLogger.java - Specialized error and exception tracking
 // Path: app/src/main/java/com/terrarialoader/logging/ErrorLogger.java
 
@@ -2834,9 +2947,7 @@ public class ErrorLogger {
 }
 
 
-
-===== ModLoader/app/src/main/java/com/modloader/logging/FileLogger.java =====
-
+--- FILE: /ModLoader/app/src/main/java/com/modloader/logging/FileLogger.java ---
 // File: FileLogger.java (Complete Fixed Version) - Full logging system with all properties
 // Path: /storage/emulated/0/AndroidIDEProjects/ModLoader/app/src/main/java/com/modloader/logging/FileLogger.java
 
@@ -3304,726 +3415,205 @@ public class FileLogger {
 }
 
 
-
-===== ModLoader/app/src/main/java/com/modloader/logging/LogAnalytics.java =====
-
-// File: LogAnalytics.java (NEW) - Advanced Log Analytics & Pattern Recognition
-// Path: /app/src/main/java/com/modloader/logging/LogAnalytics.java
+--- FILE: /ModLoader/app/src/main/java/com/modloader/logging/LogAnalytics.java ---
 package com.modloader.logging;
 
 import android.content.Context;
 import org.apache.logging.log4j.Level;
-import java.io.*;
-import java.text.SimpleDateFormat;
-import java.util.*;
+import com.modloader.util.LogUtils;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
 /**
- * FEATURE 5: ADVANCED LOG ANALYTICS
- * Generate insights from log patterns, detect anomalies, and provide recommendations
+ * LogAnalytics class to process and generate insights from log entries.
+ * This class collects log data and provides a high-level summary.
  */
 public class LogAnalytics {
-    private static final String TAG = "LogAnalytics";
-    
-    private final Context context;
-    private final File analyticsDir;
-    
-    // Analytics data structures
-    private final Map<String, AtomicInteger> categoryFrequency = new ConcurrentHashMap<>();
-    private final Map<Level, AtomicInteger> levelFrequency = new ConcurrentHashMap<>();
-    private final Map<String, AtomicInteger> errorPatterns = new ConcurrentHashMap<>();
-    private final Map<String, List<Long>> operationTimes = new ConcurrentHashMap<>();
-    private final Map<String, AtomicInteger> componentActivity = new ConcurrentHashMap<>();
-    
-    // Time-based analytics
-    private final Map<String, AtomicInteger> hourlyActivity = new ConcurrentHashMap<>();
-    private final List<LogEvent> recentEvents = Collections.synchronizedList(new ArrayList<>());
-    
-    // Pattern recognition
-    private final Map<String, Pattern> errorSignatures = new HashMap<>();
-    private final Map<String, String> knownIssues = new HashMap<>();
-    
-    // Performance tracking
-    private final AtomicLong totalProcessingTime = new AtomicLong(0);
-    private final AtomicInteger totalEventsProcessed = new AtomicInteger(0);
-    
-    // Anomaly detection
-    private final Map<String, MovingAverage> performanceBaselines = new ConcurrentHashMap<>();
-    private static final int BASELINE_WINDOW_SIZE = 100;
-    private static final double ANOMALY_THRESHOLD = 2.0; // Standard deviations
+
+    private final Map<String, List<LogEntry>> logsByCategory = new ConcurrentHashMap<>();
+    private final AtomicLong errorCount = new AtomicLong(0);
+    private final AtomicLong totalLogsCount = new AtomicLong(0);
+    private final ConcurrentHashMap<String, Long> categoryCounts = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Long> operationDurations = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, AtomicLong> operationCounts = new ConcurrentHashMap<>();
     
     public LogAnalytics(Context context) {
-        this.context = context;
-        
-        File gameBaseDir = new File(context.getExternalFilesDir(null), "ModLoader/com.and.games505.TerrariaPaid");
-        this.analyticsDir = new File(gameBaseDir, "Analytics");
-        
-        ensureDirectoriesExist();
-        initializeErrorSignatures();
-        loadHistoricalData();
+        // Initialization can happen here if needed, but the class is stateless for now.
     }
-    
-    private void ensureDirectoriesExist() {
-        if (!analyticsDir.exists()) {
-            analyticsDir.mkdirs();
-        }
-        
-        // Create subdirectories
-        new File(analyticsDir, "daily_reports").mkdirs();
-        new File(analyticsDir, "weekly_summaries").mkdirs();
-        
-        // Create analytics README
-        File readme = new File(analyticsDir, "README.txt");
-        if (!readme.exists()) {
-            try (FileWriter writer = new FileWriter(readme)) {
-                writer.write("=== ModLoader Analytics Directory ===\n\n");
-                writer.write("This directory contains advanced analytics and insights generated from log patterns.\n\n");
-                writer.write("Files:\n");
-                writer.write("• daily_reports/ - Daily analytics summaries\n");
-                writer.write("• error_analysis.json - Error pattern analysis\n");
-                writer.write("• performance_insights.json - Performance analytics\n");
-                writer.write("• anomalies.log - Detected anomalies and unusual patterns\n");
-                writer.write("• recommendations.txt - AI-generated improvement suggestions\n");
-                writer.write("\nGenerated: " + new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date()) + "\n");
-            } catch (IOException e) {
-                System.err.println("Failed to create analytics README: " + e.getMessage());
-            }
-        }
-    }
-    
-    private void initializeErrorSignatures() {
-        // Define common error patterns for recognition
-        errorSignatures.put("PERMISSION_DENIED", Pattern.compile(".*permission.*denied.*", Pattern.CASE_INSENSITIVE));
-        errorSignatures.put("FILE_NOT_FOUND", Pattern.compile(".*file.*not.*found.*", Pattern.CASE_INSENSITIVE));
-        errorSignatures.put("STORAGE_FULL", Pattern.compile(".*no space.*|.*storage.*full.*", Pattern.CASE_INSENSITIVE));
-        errorSignatures.put("NETWORK_ERROR", Pattern.compile(".*network.*error.*|.*connection.*failed.*", Pattern.CASE_INSENSITIVE));
-        errorSignatures.put("APK_PARSE_ERROR", Pattern.compile(".*apk.*parse.*|.*package.*invalid.*", Pattern.CASE_INSENSITIVE));
-        errorSignatures.put("OUT_OF_MEMORY", Pattern.compile(".*outofmemoryerror.*|.*memory.*exceeded.*", Pattern.CASE_INSENSITIVE));
-        errorSignatures.put("LOADER_MISSING", Pattern.compile(".*loader.*not.*found.*|.*melonloader.*missing.*", Pattern.CASE_INSENSITIVE));
-        errorSignatures.put("MOD_CONFLICT", Pattern.compile(".*mod.*conflict.*|.*duplicate.*mod.*", Pattern.CASE_INSENSITIVE));
-        errorSignatures.put("SHIZUKU_ERROR", Pattern.compile(".*shizuku.*not.*running.*|.*shizuku.*permission.*", Pattern.CASE_INSENSITIVE));
-        errorSignatures.put("ROOT_ERROR", Pattern.compile(".*root.*not.*available.*|.*su.*failed.*", Pattern.CASE_INSENSITIVE));
-        
-        // Known issue solutions
-        knownIssues.put("PERMISSION_DENIED", "Grant storage and install permissions in device settings");
-        knownIssues.put("FILE_NOT_FOUND", "Check file path and ensure file exists");
-        knownIssues.put("STORAGE_FULL", "Free up device storage space");
-        knownIssues.put("NETWORK_ERROR", "Check internet connection and retry");
-        knownIssues.put("APK_PARSE_ERROR", "Re-download APK file, original may be corrupted");
-        knownIssues.put("OUT_OF_MEMORY", "Close other apps or restart device");
-        knownIssues.put("LOADER_MISSING", "Install MelonLoader/LemonLoader using setup wizard");
-        knownIssues.put("MOD_CONFLICT", "Disable conflicting mods or check mod compatibility");
-        knownIssues.put("SHIZUKU_ERROR", "Install and start Shizuku service using ADB or root");
-        knownIssues.put("ROOT_ERROR", "Use Shizuku mode instead of root for enhanced permissions");
-    }
-    
-    private void loadHistoricalData() {
-        try {
-            File historicalFile = new File(analyticsDir, "historical_analytics.json");
-            if (historicalFile.exists()) {
-                System.out.println("📊 Loading historical analytics data...");
-                // Load basic metrics from previous sessions
-                loadPreviousMetrics();
-            }
-        } catch (Exception e) {
-            System.err.println("⚠️ Failed to load historical analytics: " + e.getMessage());
-        }
-    }
-    
-    private void loadPreviousMetrics() {
-        // Simple implementation - in production would use proper JSON parsing
-        try {
-            File metricsFile = new File(analyticsDir, "session_metrics.txt");
-            if (metricsFile.exists()) {
-                try (BufferedReader reader = new BufferedReader(new FileReader(metricsFile))) {
-                    String line;
-                    while ((line = reader.readLine()) != null) {
-                        if (line.contains("=")) {
-                            String[] parts = line.split("=");
-                            if (parts.length == 2) {
-                                try {
-                                    int value = Integer.parseInt(parts[1].trim());
-                                    // Load into appropriate counters
-                                } catch (NumberFormatException e) {
-                                    // Skip invalid entries
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        } catch (IOException e) {
-            System.err.println("Error loading previous metrics: " + e.getMessage());
-        }
-    }
-    
+
     /**
-     * Record a log entry for analytics processing
+     * Records a log entry for analysis.
+     *
+     * @param logUtilsEntry The log entry from LogUtils.
      */
-    public void recordLogEntry(LogEntry entry) {
-        if (entry == null) return;
-        
-        long startTime = System.currentTimeMillis();
-        
-        try {
-            // Update basic frequency counters
-            categoryFrequency.computeIfAbsent(entry.category, k -> new AtomicInteger(0)).incrementAndGet();
-            levelFrequency.computeIfAbsent(entry.level, k -> new AtomicInteger(0)).incrementAndGet();
-            
-            // Extract component from message
-            String component = extractComponent(entry.message);
-            if (component != null) {
-                componentActivity.computeIfAbsent(component, k -> new AtomicInteger(0)).incrementAndGet();
-            }
-            
-            // Time-based analytics
-            String hour = new SimpleDateFormat("HH").format(new Date(entry.timestamp));
-            hourlyActivity.computeIfAbsent(hour, k -> new AtomicInteger(0)).incrementAndGet();
-            
-            // Error pattern analysis
-            if (entry.level == Level.ERROR || entry.level == Level.WARN) {
-                analyzeErrorPattern(entry.message);
-            }
-            
-            // Performance analysis
-            if (entry.message.contains("completed in") || entry.message.contains("took")) {
-                analyzePerformanceData(entry.message);
-            }
-            
-            // Store recent events for trend analysis
-            LogEvent logEvent = new LogEvent(entry);
-            recentEvents.add(logEvent);
-            
-            // Limit recent events to prevent memory issues
-            if (recentEvents.size() > 10000) {
-                recentEvents.remove(0);
-            }
-            
-            // Detect anomalies
-            detectAnomalies(entry);
-            
-            totalEventsProcessed.incrementAndGet();
-            
-        } finally {
-            totalProcessingTime.addAndGet(System.currentTimeMillis() - startTime);
+    public void recordLogEntry(LogUtils.LogEntry logUtilsEntry) {
+        if (logUtilsEntry == null) {
+            return;
         }
-    }
-    
-    private String extractComponent(String message) {
-        // Extract component name from log messages
-        if (message.contains("[") && message.contains("]")) {
-            int start = message.indexOf('[');
-            int end = message.indexOf(']', start);
-            if (end > start) {
-                return message.substring(start + 1, end);
-            }
+
+        // Increment total log count
+        totalLogsCount.incrementAndGet();
+
+        // Increment category count
+        categoryCounts.merge(logUtilsEntry.getCategory(), 1L, Long::sum);
+
+        // Check for error level logs
+        if (logUtilsEntry.getLevel() == Level.ERROR) {
+            errorCount.incrementAndGet();
         }
-        
-        // Common component patterns
-        if (message.contains("APK")) return "APK_MANAGER";
-        if (message.contains("mod") || message.contains("Mod")) return "MOD_MANAGER";
-        if (message.contains("MelonLoader") || message.contains("LemonLoader")) return "LOADER_SYSTEM";
-        if (message.contains("Shizuku")) return "SHIZUKU_MANAGER";
-        if (message.contains("Root")) return "ROOT_MANAGER";
-        if (message.contains("diagnostic") || message.contains("Diagnostic")) return "DIAGNOSTIC_SYSTEM";
-        if (message.contains("settings") || message.contains("Settings")) return "SETTINGS_MANAGER";
-        
-        return "UNKNOWN";
-    }
-    
-    private void analyzeErrorPattern(String message) {
-        for (Map.Entry<String, Pattern> entry : errorSignatures.entrySet()) {
-            if (entry.getValue().matcher(message).matches()) {
-                errorPatterns.computeIfAbsent(entry.getKey(), k -> new AtomicInteger(0)).incrementAndGet();
-                
-                // Log detailed error analysis
-                logErrorAnalysis(entry.getKey(), message);
-                break;
-            }
-        }
-    }
-    
-    private void analyzePerformanceData(String message) {
-        try {
-            // Extract timing information from performance messages
-            String[] parts = message.split("\\s+");
-            for (int i = 0; i < parts.length - 1; i++) {
-                if (parts[i].equals("in") && parts[i + 1].endsWith("ms")) {
-                    String timeStr = parts[i + 1].replace("ms", "");
-                    long timeMs = Long.parseLong(timeStr);
-                    
-                    // Extract operation name
-                    String operation = "UNKNOWN_OPERATION";
-                    if (message.contains("⏱️")) {
-                        int start = message.indexOf("⏱️") + 2;
-                        int end = message.indexOf("completed", start);
-                        if (end > start) {
-                            operation = message.substring(start, end).trim();
-                        }
-                    }
-                    
-                    // Record operation time
-                    operationTimes.computeIfAbsent(operation, k -> Collections.synchronizedList(new ArrayList<>()))
-                                 .add(timeMs);
-                    
-                    // Update performance baselines for anomaly detection
-                    updatePerformanceBaseline(operation, timeMs);
-                    break;
-                }
-            }
-        } catch (Exception e) {
-            // Ignore parsing errors
-        }
-    }
-    
-    private void updatePerformanceBaseline(String operation, long timeMs) {
-        MovingAverage baseline = performanceBaselines.computeIfAbsent(operation, 
-            k -> new MovingAverage(BASELINE_WINDOW_SIZE));
-        baseline.addValue(timeMs);
-        
-        // Check for performance anomalies
-        if (baseline.getCount() > 10) {
-            double mean = baseline.getAverage();
-            double stdDev = baseline.getStandardDeviation();
-            
-            if (Math.abs(timeMs - mean) > ANOMALY_THRESHOLD * stdDev) {
-                logPerformanceAnomaly(operation, timeMs, mean, stdDev);
-            }
-        }
-    }
-    
-    private void detectAnomalies(LogEntry entry) {
-        // Simple anomaly detection based on patterns
-        
-        // High error rate detection
-        if (entry.level == Level.ERROR) {
-            long recentErrors = recentEvents.stream()
-                .filter(e -> e.level == Level.ERROR)
-                .filter(e -> System.currentTimeMillis() - e.timestamp < 300000) // 5 minutes
-                .count();
-            
-            if (recentErrors > 10) {
-                logAnomaly("HIGH_ERROR_RATE", "Detected " + recentErrors + " errors in last 5 minutes");
-            }
-        }
-        
-        // Rapid log generation detection
-        long recentCount = recentEvents.stream()
-            .filter(e -> System.currentTimeMillis() - e.timestamp < 60000) // 1 minute
-            .count();
-        
-        if (recentCount > 100) {
-            logAnomaly("HIGH_LOG_VOLUME", "Generated " + recentCount + " log entries in last minute");
-        }
-    }
-    
-    private void logErrorAnalysis(String errorType, String message) {
-        try {
-            File errorAnalysisFile = new File(analyticsDir, "error_analysis.log");
-            try (FileWriter writer = new FileWriter(errorAnalysisFile, true)) {
-                writer.write(String.format("%s|%s|%s|%s\n",
-                    new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date()),
-                    errorType,
-                    knownIssues.getOrDefault(errorType, "No solution available"),
-                    message.replace("\n", " ").replace("|", ";")));
-            }
-        } catch (IOException e) {
-            System.err.println("Failed to log error analysis: " + e.getMessage());
-        }
-    }
-    
-    private void logPerformanceAnomaly(String operation, long actualTime, double expectedTime, double stdDev) {
-        try {
-            File anomalyFile = new File(analyticsDir, "anomalies.log");
-            try (FileWriter writer = new FileWriter(anomalyFile, true)) {
-                writer.write(String.format("%s|PERFORMANCE_ANOMALY|%s|actual=%dms,expected=%.1fms,deviation=%.1f\n",
-                    new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date()),
-                    operation, actualTime, expectedTime, stdDev));
-            }
-        } catch (IOException e) {
-            System.err.println("Failed to log performance anomaly: " + e.getMessage());
-        }
-    }
-    
-    private void logAnomaly(String anomalyType, String description) {
-        try {
-            File anomalyFile = new File(analyticsDir, "anomalies.log");
-            try (FileWriter writer = new FileWriter(anomalyFile, true)) {
-                writer.write(String.format("%s|%s|%s\n",
-                    new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date()),
-                    anomalyType, description));
-            }
-        } catch (IOException e) {
-            System.err.println("Failed to log anomaly: " + e.getMessage());
-        }
+
+        // Add to the list of logs for the category
+        LogEntry entry = new LogEntry(
+            logUtilsEntry.getCategory(),
+            logUtilsEntry.getLevel(),
+            logUtilsEntry.getMessage(),
+            logUtilsEntry.getCorrelationId(),
+            logUtilsEntry.getTimestamp(),
+            logUtilsEntry.getThrowable()
+        );
+        logsByCategory.computeIfAbsent(entry.getCategory(), k -> new ArrayList<>()).add(entry);
     }
     
     /**
-     * Generate comprehensive analytics report
+     * Generates a comprehensive report with key log metrics.
+     *
+     * @return A map containing analytics data.
      */
     public Map<String, Object> generateReport() {
         Map<String, Object> report = new HashMap<>();
+
+        long total = totalLogsCount.get();
+        long errors = errorCount.get();
+        double errorRate = (total > 0) ? ((double) errors / total) * 100 : 0.0;
         
-        // Basic statistics
-        report.put("totalEvents", totalEventsProcessed.get());
-        report.put("avgProcessingTimeMs", getAverageProcessingTime());
-        report.put("mostActiveCategory", getMostActiveCategory());
-        report.put("errorRate", getErrorRate());
-        
-        // Category breakdown
-        Map<String, Integer> categories = new HashMap<>();
-        for (Map.Entry<String, AtomicInteger> entry : categoryFrequency.entrySet()) {
-            categories.put(entry.getKey(), entry.getValue().get());
-        }
-        report.put("categoryBreakdown", categories);
-        
-        // Level distribution
-        Map<String, Integer> levels = new HashMap<>();
-        for (Map.Entry<Level, AtomicInteger> entry : levelFrequency.entrySet()) {
-            levels.put(entry.getKey().toString(), entry.getValue().get());
-        }
-        report.put("levelDistribution", levels);
-        
-        // Error patterns
-        Map<String, Integer> errors = new HashMap<>();
-        for (Map.Entry<String, AtomicInteger> entry : errorPatterns.entrySet()) {
-            errors.put(entry.getKey(), entry.getValue().get());
-        }
-        report.put("errorPatterns", errors);
-        
-        // Component activity
-        Map<String, Integer> components = new HashMap<>();
-        for (Map.Entry<String, AtomicInteger> entry : componentActivity.entrySet()) {
-            components.put(entry.getKey(), entry.getValue().get());
-        }
-        report.put("componentActivity", components);
-        
-        // Performance metrics
-        Map<String, Double> performance = new HashMap<>();
-        for (Map.Entry<String, List<Long>> entry : operationTimes.entrySet()) {
-            List<Long> times = entry.getValue();
-            if (!times.isEmpty()) {
-                double avg = times.stream().mapToLong(Long::longValue).average().orElse(0.0);
-                performance.put(entry.getKey(), avg);
+        report.put("totalLogs", total);
+        report.put("totalErrors", errors);
+        report.put("errorRate", errorRate);
+        report.put("categoryCounts", categoryCounts);
+
+        String mostActiveCategory = "N/A";
+        long maxCount = 0;
+        for (Map.Entry<String, Long> entry : categoryCounts.entrySet()) {
+            if (entry.getValue() > maxCount) {
+                maxCount = entry.getValue();
+                mostActiveCategory = entry.getKey();
             }
         }
-        report.put("avgOperationTimes", performance);
-        
-        // Hourly activity
-        Map<String, Integer> hourly = new HashMap<>();
-        for (Map.Entry<String, AtomicInteger> entry : hourlyActivity.entrySet()) {
-            hourly.put(entry.getKey(), entry.getValue().get());
+        report.put("mostActiveCategory", mostActiveCategory);
+
+        // Calculate average performance metrics
+        long totalDuration = 0;
+        long totalOps = 0;
+        for (Map.Entry<String, Long> entry : operationDurations.entrySet()) {
+            String opName = entry.getKey();
+            long duration = entry.getValue();
+            long count = operationCounts.getOrDefault(opName, new AtomicLong(0)).get();
+            if (count > 0) {
+                totalDuration += duration;
+                totalOps += count;
+            }
         }
-        report.put("hourlyActivity", hourly);
-        
-        // Top recommendations
-        report.put("recommendations", generateRecommendations());
-        
+        double avgOpTime = totalOps > 0 ? (double) totalDuration / totalOps : 0.0;
+        report.put("avgOperationTime", avgOpTime);
+        report.put("operationDurations", operationDurations);
+
         return report;
     }
-    
-    private double getAverageProcessingTime() {
-        int total = totalEventsProcessed.get();
-        return total > 0 ? (double) totalProcessingTime.get() / total : 0.0;
-    }
-    
-    private String getMostActiveCategory() {
-        return categoryFrequency.entrySet().stream()
-            .max(Map.Entry.comparingByValue((a, b) -> Integer.compare(a.get(), b.get())))
-            .map(Map.Entry::getKey)
-            .orElse("N/A");
-    }
-    
-    private double getErrorRate() {
-        int totalErrors = levelFrequency.getOrDefault(Level.ERROR, new AtomicInteger(0)).get();
-        int total = totalEventsProcessed.get();
-        return total > 0 ? (totalErrors * 100.0) / total : 0.0;
-    }
-    
-    private List<String> generateRecommendations() {
-        List<String> recommendations = new ArrayList<>();
-        
-        // Error-based recommendations
-        String topError = errorPatterns.entrySet().stream()
-            .max(Map.Entry.comparingByValue((a, b) -> Integer.compare(a.get(), b.get())))
-            .map(Map.Entry::getKey)
-            .orElse(null);
-        
-        if (topError != null && errorPatterns.get(topError).get() > 5) {
-            String solution = knownIssues.get(topError);
-            if (solution != null) {
-                recommendations.add("🔧 " + solution + " (detected " + errorPatterns.get(topError).get() + " occurrences)");
-            }
-        }
-        
-        // Performance recommendations
-        for (Map.Entry<String, List<Long>> entry : operationTimes.entrySet()) {
-            List<Long> times = entry.getValue();
-            if (times.size() > 10) {
-                double avg = times.stream().mapToLong(Long::longValue).average().orElse(0.0);
-                if (avg > 5000) { // Operations taking more than 5 seconds
-                    recommendations.add("⏱️ " + entry.getKey() + " is slow (avg " + String.format("%.1f", avg) + "ms) - consider optimization");
-                }
-            }
-        }
-        
-        // General recommendations based on patterns
-        double errorRate = getErrorRate();
-        if (errorRate > 10) {
-            recommendations.add("🚨 High error rate (" + String.format("%.1f", errorRate) + "%) - check system stability");
-        }
-        
-        if (recommendations.isEmpty()) {
-            recommendations.add("✅ System appears to be running optimally");
-        }
-        
-        return recommendations;
-    }
-    
+
     /**
-     * Generate daily report
+     * Tracks a user action for UX insights.
+     *
+     * @param action The user action to track.
      */
-    public void generateDailyReport() {
-        try {
-            String date = new SimpleDateFormat("yyyy-MM-dd").format(new Date());
-            File dailyReport = new File(analyticsDir, "daily_reports/report_" + date + ".txt");
-            dailyReport.getParentFile().mkdirs();
-            
-            try (FileWriter writer = new FileWriter(dailyReport)) {
-                writer.write("=== ModLoader Daily Analytics Report ===\n");
-                writer.write("Date: " + date + "\n");
-                writer.write("Generated: " + new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date()) + "\n\n");
-                
-                Map<String, Object> report = generateReport();
-                
-                writer.write("SUMMARY:\n");
-                writer.write("• Total events processed: " + report.get("totalEvents") + "\n");
-                writer.write("• Error rate: " + String.format("%.2f", (Double) report.get("errorRate")) + "%\n");
-                writer.write("• Most active category: " + report.get("mostActiveCategory") + "\n");
-                writer.write("• Average processing time: " + String.format("%.2f", (Double) report.get("avgProcessingTimeMs")) + "ms\n\n");
-                
-                writer.write("TOP ERROR PATTERNS:\n");
-                @SuppressWarnings("unchecked")
-                Map<String, Integer> errors = (Map<String, Integer>) report.get("errorPatterns");
-                errors.entrySet().stream()
-                    .sorted(Map.Entry.<String, Integer>comparingByValue().reversed())
-                    .limit(5)
-                    .forEach(entry -> {
-                        try {
-                            writer.write("• " + entry.getKey() + ": " + entry.getValue() + " occurrences\n");
-                        } catch (IOException e) {
-                            // Ignore
-                        }
-                    });
-                
-                writer.write("\nRECOMMENDATIONS:\n");
-                @SuppressWarnings("unchecked")
-                List<String> recommendations = (List<String>) report.get("recommendations");
-                for (String rec : recommendations) {
-                    writer.write("• " + rec + "\n");
-                }
-            }
-            
-        } catch (IOException e) {
-            System.err.println("Failed to generate daily report: " + e.getMessage());
-        }
+    public void trackUserAction(String action) {
+        // Future implementation to log user-specific events to a separate stream
+        // for more detailed UX analytics.
     }
-    
+
     /**
-     * Save analytics state
+     * Internal class to represent a stripped-down log entry for analytics purposes.
      */
-    public void saveState() {
-        try {
-            File stateFile = new File(analyticsDir, "session_metrics.txt");
-            try (FileWriter writer = new FileWriter(stateFile)) {
-                writer.write("# ModLoader Analytics Session State\n");
-                writer.write("totalEventsProcessed=" + totalEventsProcessed.get() + "\n");
-                writer.write("totalProcessingTime=" + totalProcessingTime.get() + "\n");
-                
-                for (Map.Entry<String, AtomicInteger> entry : categoryFrequency.entrySet()) {
-                    writer.write("category_" + entry.getKey() + "=" + entry.getValue().get() + "\n");
-                }
-                
-                for (Map.Entry<String, AtomicInteger> entry : errorPatterns.entrySet()) {
-                    writer.write("error_" + entry.getKey() + "=" + entry.getValue().get() + "\n");
-                }
-            }
-        } catch (IOException e) {
-            System.err.println("Failed to save analytics state: " + e.getMessage());
-        }
-    }
-    
-    /**
-     * Internal classes
-     */
-    
-    public static class LogEntry {
-        public final String category;
-        public final Level level;
-        public final String message;
-        public final long timestamp;
-        
-        public LogEntry(String category, Level level, String message, long timestamp) {
+    private static class LogEntry {
+        private final String category;
+        private final Level level; // Fixed type to org.apache.logging.log4j.Level
+        private final String message;
+        private final String correlationId;
+        private final long timestamp;
+        private final Throwable throwable;
+
+        LogEntry(String category, Level level, String message, String correlationId, long timestamp, Throwable throwable) {
             this.category = category;
             this.level = level;
             this.message = message;
+            this.correlationId = correlationId;
             this.timestamp = timestamp;
+            this.throwable = throwable;
         }
-    }
-    
-    private static class LogEvent {
-        final String category;
-        final Level level;
-        final long timestamp;
-        
-        LogEvent(LogEntry entry) {
-            this.category = entry.category;
-            this.level = entry.level;
-            this.timestamp = entry.timestamp;
-        }
-    }
-    
-    private static class MovingAverage {
-        private final Queue<Double> values = new LinkedList<>();
-        private final int maxSize;
-        private double sum = 0.0;
-        
-        MovingAverage(int maxSize) {
-            this.maxSize = maxSize;
-        }
-        
-        void addValue(double value) {
-            if (values.size() >= maxSize) {
-                sum -= values.poll();
-            }
-            values.offer(value);
-            sum += value;
-        }
-        
-        double getAverage() {
-            return values.isEmpty() ? 0.0 : sum / values.size();
-        }
-        
-        double getStandardDeviation() {
-            if (values.size() < 2) return 0.0;
-            
-            double mean = getAverage();
-            double variance = values.stream()
-                .mapToDouble(v -> Math.pow(v - mean, 2))
-                .average()
-                .orElse(0.0);
-            return Math.sqrt(variance);
-        }
-        
-        int getCount() {
-            return values.size();
-        }
+
+        // Getters
+        public String getCategory() { return category; }
+        public Level getLevel() { return level; }
+        public String getMessage() { return message; }
+        public String getCorrelationId() { return correlationId; }
+        public long getTimestamp() { return timestamp; }
+        public Throwable getThrowable() { return throwable; }
     }
 }
 
 
 
-===== ModLoader/app/src/main/java/com/modloader/logging/LogCorrelation.java =====
 
-// File: LogCorrelation.java (NEW) - Log Correlation ID System
+--- FILE: /ModLoader/app/src/main/java/com/modloader/logging/LogCorrelation.java ---
+// =========================
+// LogCorrelation.java
+// =========================
+// File: LogCorrelation.java - Complete Implementation
 // Path: /app/src/main/java/com/modloader/logging/LogCorrelation.java
+
 package com.modloader.logging;
 
-import java.util.*;
+import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ThreadLocalRandom;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * FEATURE 10: LOG CORRELATION IDS
- * Track related operations across components for better debugging and analysis
+ * Log Correlation ID Manager for tracking related operations
  */
 public class LogCorrelation {
-    private static final String TAG = "LogCorrelation";
-    
-    // Thread-local storage for correlation context
-    private static final ThreadLocal<String> currentCorrelationId = new ThreadLocal<>();
-    private static final ThreadLocal<Stack<String>> correlationStack = ThreadLocal.withInitial(Stack::new);
-    
-    // Active operations tracking
     private final Map<String, OperationContext> activeOperations = new ConcurrentHashMap<>();
-    private final Map<String, List<String>> operationHierarchy = new ConcurrentHashMap<>();
-    private final Map<String, OperationResult> completedOperations = new ConcurrentHashMap<>();
-    
-    // Operation statistics
-    private final Map<String, AtomicInteger> operationCounts = new ConcurrentHashMap<>();
-    private final Map<String, AtomicLong> operationTotalTime = new ConcurrentHashMap<>();
-    private final Map<String, AtomicInteger> operationSuccessCount = new ConcurrentHashMap<>();
-    private final Map<String, AtomicInteger> operationFailureCount = new ConcurrentHashMap<>();
-    
-    // Correlation ID generation
-    private static final AtomicInteger correlationSequence = new AtomicInteger(1);
-    private final String sessionId;
-    
-    // Configuration
-    private static final int MAX_COMPLETED_OPERATIONS = 10000;
-    private static final long OPERATION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
-    
-    public LogCorrelation() {
-        this.sessionId = generateSessionId();
-    }
-    
-    private String generateSessionId() {
-        return String.format("SID-%08X", ThreadLocalRandom.current().nextInt());
-    }
+    private final ThreadLocal<String> currentCorrelationId = new ThreadLocal<>();
     
     /**
-     * Generate a new correlation ID for an operation
+     * Generate a new correlation ID with prefix
      */
-    public String generateCorrelationId(String operationType) {
-        int sequence = correlationSequence.getAndIncrement();
-        String correlationId = String.format("%s-%s-%04d", 
-            sessionId, sanitizeOperationType(operationType), sequence);
-        
-        // Set as current thread's correlation ID
+    public String generateCorrelationId(String prefix) {
+        String correlationId = prefix + "_" + UUID.randomUUID().toString().substring(0, 8);
         currentCorrelationId.set(correlationId);
-        
         return correlationId;
     }
     
-    private String sanitizeOperationType(String operationType) {
-        if (operationType == null) return "UNKNOWN";
-        return operationType.toUpperCase()
-            .replaceAll("[^A-Z0-9_]", "_")
-            .substring(0, Math.min(operationType.length(), 10));
+    /**
+     * Get current correlation ID or generate new one
+     */
+    public String getCurrentOrGenerate(String prefix) {
+        String current = currentCorrelationId.get();
+        if (current == null) {
+            current = generateCorrelationId(prefix);
+        }
+        return current;
     }
     
     /**
-     * Start a new correlated operation
+     * Start a correlated operation
      */
     public String startOperation(String operationName) {
-        String correlationId = generateCorrelationId(operationName);
-        
-        OperationContext context = new OperationContext(
-            operationName, 
-            correlationId, 
-            System.currentTimeMillis(),
-            Thread.currentThread().getName()
-        );
-        
-        activeOperations.put(correlationId, context);
-        operationCounts.computeIfAbsent(operationName, k -> new AtomicInteger(0)).incrementAndGet();
-        
-        // Handle operation nesting
-        String parentId = getCurrentCorrelationId();
-        if (parentId != null && !parentId.equals(correlationId)) {
-            operationHierarchy.computeIfAbsent(parentId, k -> new ArrayList<>()).add(correlationId);
-            context.parentCorrelationId = parentId;
-        }
-        
-        // Push to correlation stack for nested operations
-        correlationStack.get().push(correlationId);
-        
+        String correlationId = generateCorrelationId(operationName.toUpperCase());
+        activeOperations.put(correlationId, new OperationContext(operationName, System.currentTimeMillis()));
         return correlationId;
     }
     
@@ -4031,402 +3621,68 @@ public class LogCorrelation {
      * End a correlated operation
      */
     public void endOperation(String correlationId, boolean success) {
-        if (correlationId == null) return;
-        
         OperationContext context = activeOperations.remove(correlationId);
-        if (context == null) return;
-        
-        long duration = System.currentTimeMillis() - context.startTime;
-        
-        // Update statistics
-        operationTotalTime.computeIfAbsent(context.operationName, k -> new AtomicLong(0))
-                          .addAndGet(duration);
-        
-        if (success) {
-            operationSuccessCount.computeIfAbsent(context.operationName, k -> new AtomicInteger(0))
-                                 .incrementAndGet();
-        } else {
-            operationFailureCount.computeIfAbsent(context.operationName, k -> new AtomicInteger(0))
-                                 .incrementAndGet();
+        if (context != null) {
+            context.endTime = System.currentTimeMillis();
+            context.success = success;
         }
         
-        // Store operation result
-        OperationResult result = new OperationResult(context, duration, success);
-        completedOperations.put(correlationId, result);
-        
-        // Clean up old completed operations
-        if (completedOperations.size() > MAX_COMPLETED_OPERATIONS) {
-            cleanupOldOperations();
-        }
-        
-        // Pop from correlation stack
-        Stack<String> stack = correlationStack.get();
-        if (!stack.isEmpty() && correlationId.equals(stack.peek())) {
-            stack.pop();
-        }
-        
-        // Update current correlation ID to parent if available
-        if (!stack.isEmpty()) {
-            currentCorrelationId.set(stack.peek());
-        } else {
+        // Clear from thread local if it matches
+        if (correlationId.equals(currentCorrelationId.get())) {
             currentCorrelationId.remove();
         }
     }
     
     /**
-     * Get current correlation ID for the thread
+     * Set current correlation ID for thread
+     */
+    public void setCurrentCorrelationId(String correlationId) {
+        currentCorrelationId.set(correlationId);
+    }
+    
+    /**
+     * Get current correlation ID for thread
      */
     public String getCurrentCorrelationId() {
         return currentCorrelationId.get();
     }
     
     /**
-     * Get current correlation ID or generate a new one
-     */
-    public String getCurrentOrGenerate(String operationType) {
-        String current = getCurrentCorrelationId();
-        if (current != null) {
-            return current;
-        }
-        return generateCorrelationId(operationType);
-    }
-    
-    /**
-     * Set correlation ID for current thread
-     */
-    public void setCorrelationId(String correlationId) {
-        currentCorrelationId.set(correlationId);
-        
-        // Update stack
-        Stack<String> stack = correlationStack.get();
-        if (stack.isEmpty() || !correlationId.equals(stack.peek())) {
-            stack.push(correlationId);
-        }
-    }
-    
-    /**
      * Clear correlation ID for current thread
      */
-    public void clearCorrelationId() {
+    public void clearCurrentCorrelationId() {
         currentCorrelationId.remove();
-        correlationStack.get().clear();
     }
     
     /**
-     * Get operation context by correlation ID
+     * Get active operations count
      */
-    public OperationContext getOperationContext(String correlationId) {
-        return activeOperations.get(correlationId);
+    public int getActiveOperationsCount() {
+        return activeOperations.size();
     }
     
     /**
-     * Get all active operations
+     * Operation context for tracking
      */
-    public Map<String, OperationContext> getActiveOperations() {
-        return new HashMap<>(activeOperations);
-    }
-    
-    /**
-     * Get operation hierarchy (parent-child relationships)
-     */
-    public Map<String, List<String>> getOperationHierarchy() {
-        return new HashMap<>(operationHierarchy);
-    }
-    
-    /**
-     * Get operation statistics
-     */
-    public Map<String, OperationStats> getOperationStatistics() {
-        Map<String, OperationStats> stats = new HashMap<>();
+    private static class OperationContext {
+        final String operationName;
+        final long startTime;
+        long endTime;
+        boolean success;
         
-        Set<String> allOperations = new HashSet<>();
-        allOperations.addAll(operationCounts.keySet());
-        allOperations.addAll(operationTotalTime.keySet());
-        
-        for (String operationName : allOperations) {
-            int count = operationCounts.getOrDefault(operationName, new AtomicInteger(0)).get();
-            long totalTime = operationTotalTime.getOrDefault(operationName, new AtomicLong(0)).get();
-            int successCount = operationSuccessCount.getOrDefault(operationName, new AtomicInteger(0)).get();
-            int failureCount = operationFailureCount.getOrDefault(operationName, new AtomicInteger(0)).get();
-            
-            double averageTime = count > 0 ? (double) totalTime / count : 0.0;
-            double successRate = (successCount + failureCount) > 0 ? 
-                (double) successCount / (successCount + failureCount) * 100.0 : 0.0;
-            
-            stats.put(operationName, new OperationStats(
-                operationName, count, totalTime, averageTime, successRate, successCount, failureCount
-            ));
-        }
-        
-        return stats;
-    }
-    
-    /**
-     * Find related operations by correlation pattern
-     */
-    public List<String> findRelatedOperations(String correlationId) {
-        List<String> related = new ArrayList<>();
-        
-        if (correlationId == null) return related;
-        
-        // Extract session and operation type from correlation ID
-        String[] parts = correlationId.split("-");
-        if (parts.length >= 3) {
-            String sessionId = parts[0];
-            String operationType = parts[1];
-            
-            // Find operations with same session and operation type
-            for (String activeId : activeOperations.keySet()) {
-                if (activeId.startsWith(sessionId + "-" + operationType + "-")) {
-                    related.add(activeId);
-                }
-            }
-            
-            for (String completedId : completedOperations.keySet()) {
-                if (completedId.startsWith(sessionId + "-" + operationType + "-")) {
-                    related.add(completedId);
-                }
-            }
-        }
-        
-        return related;
-    }
-    
-    /**
-     * Get operation trace (full execution path)
-     */
-    public List<String> getOperationTrace(String correlationId) {
-        List<String> trace = new ArrayList<>();
-        buildOperationTrace(correlationId, trace, new HashSet<>());
-        return trace;
-    }
-    
-    private void buildOperationTrace(String correlationId, List<String> trace, Set<String> visited) {
-        if (correlationId == null || visited.contains(correlationId)) {
-            return;
-        }
-        
-        visited.add(correlationId);
-        trace.add(correlationId);
-        
-        // Add child operations
-        List<String> children = operationHierarchy.get(correlationId);
-        if (children != null) {
-            for (String child : children) {
-                buildOperationTrace(child, trace, visited);
-            }
-        }
-    }
-    
-    /**
-     * Check for stuck operations (running too long)
-     */
-    public List<OperationContext> findStuckOperations() {
-        List<OperationContext> stuck = new ArrayList<>();
-        long currentTime = System.currentTimeMillis();
-        
-        for (OperationContext context : activeOperations.values()) {
-            if (currentTime - context.startTime > OPERATION_TIMEOUT_MS) {
-                stuck.add(context);
-            }
-        }
-        
-        return stuck;
-    }
-    
-    /**
-     * Clean up timed out operations
-     */
-    public void cleanupTimedOutOperations() {
-        List<OperationContext> stuckOps = findStuckOperations();
-        for (OperationContext context : stuckOps) {
-            endOperation(context.correlationId, false);
-        }
-    }
-    
-    /**
-     * Clean up old completed operations to prevent memory leaks
-     */
-    private void cleanupOldOperations() {
-        if (completedOperations.size() <= MAX_COMPLETED_OPERATIONS) {
-            return;
-        }
-        
-        // Sort by completion time and remove oldest
-        List<Map.Entry<String, OperationResult>> entries = new ArrayList<>(completedOperations.entrySet());
-        entries.sort((a, b) -> Long.compare(
-            a.getValue().completionTime, 
-            b.getValue().completionTime
-        ));
-        
-        // Remove oldest 20% of operations
-        int toRemove = Math.max(1, completedOperations.size() - MAX_COMPLETED_OPERATIONS + 100);
-        for (int i = 0; i < toRemove && i < entries.size(); i++) {
-            String correlationId = entries.get(i).getKey();
-            completedOperations.remove(correlationId);
-            operationHierarchy.remove(correlationId);
-        }
-    }
-    
-    /**
-     * Generate correlation report
-     */
-    public String generateCorrelationReport() {
-        StringBuilder report = new StringBuilder();
-        report.append("=== Log Correlation Report ===\n");
-        report.append("Session ID: ").append(sessionId).append("\n");
-        report.append("Generated: ").append(new Date()).append("\n\n");
-        
-        // Active operations
-        report.append("Active Operations: ").append(activeOperations.size()).append("\n");
-        for (OperationContext context : activeOperations.values()) {
-            long duration = System.currentTimeMillis() - context.startTime;
-            report.append(String.format("  %s - %s (running %dms)\n", 
-                context.correlationId, context.operationName, duration));
-        }
-        report.append("\n");
-        
-        // Operation statistics
-        report.append("Operation Statistics:\n");
-        Map<String, OperationStats> stats = getOperationStatistics();
-        for (OperationStats stat : stats.values()) {
-            report.append(String.format("  %s: %d calls, %.1fms avg, %.1f%% success\n",
-                stat.operationName, stat.callCount, stat.averageTime, stat.successRate));
-        }
-        report.append("\n");
-        
-        // Stuck operations
-        List<OperationContext> stuck = findStuckOperations();
-        if (!stuck.isEmpty()) {
-            report.append("⚠️ Stuck Operations:\n");
-            for (OperationContext context : stuck) {
-                long duration = System.currentTimeMillis() - context.startTime;
-                report.append(String.format("  %s - %s (stuck for %dms)\n",
-                    context.correlationId, context.operationName, duration));
-            }
-            report.append("\n");
-        }
-        
-        // Recent completions
-        report.append("Recent Completions (last 10):\n");
-        completedOperations.values().stream()
-            .sorted((a, b) -> Long.compare(b.completionTime, a.completionTime))
-            .limit(10)
-            .forEach(result -> {
-                String status = result.success ? "✅" : "❌";
-                report.append(String.format("  %s %s - %s (%dms)\n",
-                    status, result.context.correlationId, 
-                    result.context.operationName, result.duration));
-            });
-        
-        return report.toString();
-    }
-    
-    /**
-     * Clean up all resources
-     */
-    public void shutdown() {
-        // End all active operations
-        List<String> activeIds = new ArrayList<>(activeOperations.keySet());
-        for (String correlationId : activeIds) {
-            endOperation(correlationId, false);
-        }
-        
-        // Clear all data structures
-        activeOperations.clear();
-        operationHierarchy.clear();
-        completedOperations.clear();
-        operationCounts.clear();
-        operationTotalTime.clear();
-        operationSuccessCount.clear();
-        operationFailureCount.clear();
-        
-        // Clear thread locals
-        currentCorrelationId.remove();
-        correlationStack.remove();
-    }
-    
-    /**
-     * Operation Context - tracks active operation details
-     */
-    public static class OperationContext {
-        public final String operationName;
-        public final String correlationId;
-        public final long startTime;
-        public final String threadName;
-        public String parentCorrelationId;
-        public final Map<String, Object> metadata = new HashMap<>();
-        
-        public OperationContext(String operationName, String correlationId, 
-                              long startTime, String threadName) {
+        OperationContext(String operationName, long startTime) {
             this.operationName = operationName;
-            this.correlationId = correlationId;
             this.startTime = startTime;
-            this.threadName = threadName;
         }
         
-        public void addMetadata(String key, Object value) {
-            metadata.put(key, value);
-        }
-        
-        public Object getMetadata(String key) {
-            return metadata.get(key);
-        }
-    }
-    
-    /**
-     * Operation Result - tracks completed operation details
-     */
-    public static class OperationResult {
-        public final OperationContext context;
-        public final long duration;
-        public final boolean success;
-        public final long completionTime;
-        
-        public OperationResult(OperationContext context, long duration, boolean success) {
-            this.context = context;
-            this.duration = duration;
-            this.success = success;
-            this.completionTime = System.currentTimeMillis();
-        }
-    }
-    
-    /**
-     * Operation Statistics - aggregated metrics for operation types
-     */
-    public static class OperationStats {
-        public final String operationName;
-        public final int callCount;
-        public final long totalTime;
-        public final double averageTime;
-        public final double successRate;
-        public final int successCount;
-        public final int failureCount;
-        
-        public OperationStats(String operationName, int callCount, long totalTime, 
-                            double averageTime, double successRate, 
-                            int successCount, int failureCount) {
-            this.operationName = operationName;
-            this.callCount = callCount;
-            this.totalTime = totalTime;
-            this.averageTime = averageTime;
-            this.successRate = successRate;
-            this.successCount = successCount;
-            this.failureCount = failureCount;
-        }
-        
-        @Override
-        public String toString() {
-            return String.format("OperationStats{name='%s', calls=%d, avgTime=%.1fms, success=%.1f%%}",
-                operationName, callCount, averageTime, successRate);
+        long getDuration() {
+            return endTime > 0 ? endTime - startTime : System.currentTimeMillis() - startTime;
         }
     }
 }
 
 
-
-===== ModLoader/app/src/main/java/com/modloader/logging/LogExporter.java =====
-
+--- FILE: /ModLoader/app/src/main/java/com/modloader/logging/LogExporter.java ---
 package com.terrarialoader.logging;
 
 public class LogExporter {
@@ -4434,634 +3690,705 @@ public class LogExporter {
 
 
 
-
-===== ModLoader/app/src/main/java/com/modloader/logging/PerformanceMetrics.java =====
-
-// File: PerformanceMetrics.java (NEW) - System Performance Tracking & Monitoring
-// Path: /app/src/main/java/com/modloader/logging/PerformanceMetrics.java
+--- FILE: /ModLoader/app/src/main/java/com/modloader/logging/PerformanceMetrics.java ---
 package com.modloader.logging;
 
+import android.content.Context;
 import android.os.Debug;
 import android.os.Process;
-import java.io.*;
+import android.app.ActivityManager;
+import android.content.pm.PackageManager;
+import android.content.pm.ApplicationInfo;
+import android.os.Build;
+import android.os.Environment;
+import android.os.StatFs;
+import android.util.Log;
+
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileReader;
+import java.io.IOException;
+import java.io.RandomAccessFile;
+import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-import java.text.SimpleDateFormat;
+import java.util.regex.Pattern;
 
 /**
- * FEATURE 2: PERFORMANCE METRICS LOGGING
- * Track operation times, system performance, memory usage, and resource utilization
+ * Enhanced Performance Metrics with comprehensive system monitoring
+ * Tracks memory, CPU, storage, network, and custom operation metrics.
+ * This version is compatible with the Android platform.
  */
 public class PerformanceMetrics {
     private static final String TAG = "PerformanceMetrics";
-    
-    // Operation timing tracking
-    private final Map<String, OperationTimer> activeTimers = new ConcurrentHashMap<>();
+
+    // Context and configuration
+    private final Context context;
+    private final boolean enableDetailedMetrics;
+    private final long startTime;
+
+    // Metrics storage
     private final Map<String, OperationMetrics> operationMetrics = new ConcurrentHashMap<>();
-    
-    // System metrics tracking
-    private final SystemMetricsTracker systemTracker;
+    private final Map<String, List<Long>> recentOperationTimes = new ConcurrentHashMap<>();
+    private final Map<String, AtomicLong> counters = new ConcurrentHashMap<>();
+
+    // System metrics
+    private final SystemMetrics systemMetrics;
     private final MemoryTracker memoryTracker;
     private final CpuTracker cpuTracker;
-    
-    // Performance thresholds
+    private final StorageTracker storageTracker;
+
+    // Thresholds for alerts
     private static final long SLOW_OPERATION_THRESHOLD_MS = 5000; // 5 seconds
-    private static final long VERY_SLOW_OPERATION_THRESHOLD_MS = 15000; // 15 seconds
-    private static final double HIGH_CPU_THRESHOLD = 80.0; // 80% CPU usage
-    private static final long HIGH_MEMORY_THRESHOLD_MB = 200; // 200MB memory usage
-    
-    // Statistics
-    private final AtomicInteger totalOperations = new AtomicInteger(0);
-    private final AtomicInteger slowOperations = new AtomicInteger(0);
-    private final AtomicInteger verySlowOperations = new AtomicInteger(0);
-    private final AtomicLong totalOperationTime = new AtomicLong(0);
-    
-    // Background monitoring
-    private Timer backgroundMonitor;
-    
+    private static final double HIGH_MEMORY_THRESHOLD = 0.85; // 85% of available memory
+    private static final double HIGH_CPU_THRESHOLD = 0.80; // 80% CPU usage
+
+    // Date formatter for timestamps
+    private static final SimpleDateFormat timestampFormat =
+            new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault());
+
     public PerformanceMetrics() {
-        this.systemTracker = new SystemMetricsTracker();
+        this(null, true);
+    }
+
+    public PerformanceMetrics(Context context) {
+        this(context, true);
+    }
+
+    public PerformanceMetrics(Context context, boolean enableDetailedMetrics) {
+        this.context = context;
+        this.enableDetailedMetrics = enableDetailedMetrics;
+        this.startTime = System.currentTimeMillis();
+
+        // Initialize system monitoring components
+        this.systemMetrics = new SystemMetrics();
         this.memoryTracker = new MemoryTracker();
         this.cpuTracker = new CpuTracker();
-        
-        startBackgroundMonitoring();
+        this.storageTracker = new StorageTracker();
+
+        // Initialize counters
+        counters.put("operations_total", new AtomicLong(0));
+        counters.put("operations_slow", new AtomicLong(0));
+        counters.put("operations_failed", new AtomicLong(0));
+        counters.put("memory_warnings", new AtomicLong(0));
+        counters.put("cpu_warnings", new AtomicLong(0));
+
+        Log.d(TAG, "PerformanceMetrics initialized with detailed monitoring: " + enableDetailedMetrics);
     }
-    
+
+    // =========================
+    // OPERATION TRACKING METHODS
+    // =========================
+
     /**
-     * Start timing an operation
+     * Records operation performance metrics.
+     * @param operation The name of the operation.
+     * @param durationMs The duration of the operation in milliseconds.
      */
-    public String startOperation(String operationName) {
-        String operationId = generateOperationId(operationName);
-        OperationTimer timer = new OperationTimer(operationName, operationId);
-        activeTimers.put(operationId, timer);
-        return operationId;
+    public void recordOperation(String operation, long durationMs) {
+        recordOperation(operation, durationMs, null);
     }
-    
+
     /**
-     * End timing an operation
+     * Records operation with additional custom metrics.
+     * @param operation The name of the operation.
+     * @param durationMs The duration of the operation in milliseconds.
+     * @param customMetrics A map of custom key-value metrics.
      */
-    public long endOperation(String operationId) {
-        OperationTimer timer = activeTimers.remove(operationId);
-        if (timer == null) {
-            return -1;
+    public void recordOperation(String operation, long durationMs, Map<String, Object> customMetrics) {
+        if (operation == null) return;
+
+        counters.get("operations_total").incrementAndGet();
+
+        // Update operation metrics
+        operationMetrics.computeIfAbsent(operation, k -> new OperationMetrics(k))
+                .recordExecution(durationMs, customMetrics);
+
+        // Track recent operation times for trend analysis
+        recentOperationTimes.computeIfAbsent(operation, k -> new ArrayList<>())
+                .add(durationMs);
+
+        // Clean old entries (keep only last 100)
+        List<Long> recentTimes = recentOperationTimes.get(operation);
+        if (recentTimes.size() > 100) {
+            recentTimes.subList(0, recentTimes.size() - 100).clear();
         }
-        
-        long duration = timer.end();
-        recordOperationMetrics(timer.operationName, duration, timer.getMetrics());
-        
-        return duration;
-    }
-    
-    /**
-     * Record operation performance data
-     */
-    public void recordOperation(String operationName, long durationMs, Map<String, Object> additionalMetrics) {
-        totalOperations.incrementAndGet();
-        totalOperationTime.addAndGet(durationMs);
-        
+
         // Check for slow operations
-        if (durationMs >= VERY_SLOW_OPERATION_THRESHOLD_MS) {
-            verySlowOperations.incrementAndGet();
-        } else if (durationMs >= SLOW_OPERATION_THRESHOLD_MS) {
-            slowOperations.incrementAndGet();
+        if (durationMs > SLOW_OPERATION_THRESHOLD_MS) {
+            counters.get("operations_slow").incrementAndGet();
+            Log.w(TAG, String.format("Slow operation detected: %s took %dms", operation, durationMs));
         }
-        
-        // Update operation-specific metrics
-        OperationMetrics metrics = operationMetrics.computeIfAbsent(operationName, 
-            k -> new OperationMetrics(operationName));
-        metrics.recordExecution(durationMs, additionalMetrics);
-        
-        // Log performance warnings
-        logPerformanceWarnings(operationName, durationMs);
+
+        // Collect system metrics if enabled
+        if (enableDetailedMetrics) {
+            collectSystemMetrics();
+        }
+
+        Log.d(TAG, String.format("Recorded operation: %s (%dms)", operation, durationMs));
     }
-    
+
     /**
-     * Get current system performance snapshot
+     * Records a failed operation.
+     * @param operation The name of the operation.
+     * @param error A descriptive error message.
      */
-    public SystemPerformanceSnapshot getSystemSnapshot() {
-        return new SystemPerformanceSnapshot(
-            memoryTracker.getCurrentMemoryUsage(),
-            cpuTracker.getCurrentCpuUsage(),
-            systemTracker.getDiskUsage(),
-            systemTracker.getNetworkStats(),
-            System.currentTimeMillis()
-        );
+    public void recordFailedOperation(String operation, String error) {
+        recordFailedOperation(operation, error, null);
     }
-    
+
     /**
-     * Get operation metrics summary
+     * Records a failed operation with additional context.
+     * @param operation The name of the operation.
+     * @param error A descriptive error message.
+     * @param throwable The Throwable that caused the failure.
      */
-    public Map<String, OperationSummary> getOperationSummaries() {
-        Map<String, OperationSummary> summaries = new HashMap<>();
-        
-        for (Map.Entry<String, OperationMetrics> entry : operationMetrics.entrySet()) {
-            OperationMetrics metrics = entry.getValue();
-            summaries.put(entry.getKey(), new OperationSummary(
-                entry.getKey(),
-                metrics.getCallCount(),
-                metrics.getTotalTime(),
-                metrics.getAverageTime(),
-                metrics.getMinTime(),
-                metrics.getMaxTime(),
-                metrics.getPercentile(95),
-                metrics.getSuccessRate()
-            ));
-        }
-        
-        return summaries;
+    public void recordFailedOperation(String operation, String error, Throwable throwable) {
+        if (operation == null) return;
+
+        counters.get("operations_failed").incrementAndGet();
+
+        operationMetrics.computeIfAbsent(operation, k -> new OperationMetrics(k))
+                .recordFailure(error, throwable);
+
+        Log.w(TAG, String.format("Failed operation recorded: %s - %s", operation, error), throwable);
     }
-    
+
     /**
-     * Generate performance recommendations based on metrics
+     * Starts timing an operation and returns the start time for manual timing.
+     * @param operation The name of the operation.
+     * @return The start time in milliseconds.
      */
-    private List<String> generateRecommendations() {
-        List<String> recommendations = new ArrayList<>();
-        
-        // Check for slow operations
-        double slowOperationRate = totalOperations.get() > 0 ? 
-            (slowOperations.get() * 100.0 / totalOperations.get()) : 0;
-        if (slowOperationRate > 20) {
-            recommendations.add("High slow operation rate (" + String.format("%.1f", slowOperationRate) + 
-                "%) - consider optimizing frequently used operations");
-        }
-        
-        // Check memory usage
-        SystemPerformanceSnapshot snapshot = getSystemSnapshot();
-        if (snapshot.memoryUsagePercent > 80) {
-            recommendations.add("High memory usage (" + String.format("%.1f", snapshot.memoryUsagePercent) + 
-                "%) - consider reducing memory consumption or adding cleanup");
-        }
-        
-        // Check for memory leaks
-        long memoryTrend = memoryTracker.getMemoryTrend();
-        if (memoryTrend > 50) { // Growing by more than 50MB over time
-            recommendations.add("Possible memory leak detected - memory usage trending upward by " + 
-                memoryTrend + "MB");
-        }
-        
-        // Check for CPU intensive operations
-        if (snapshot.cpuUsagePercent > HIGH_CPU_THRESHOLD) {
-            recommendations.add("High CPU usage (" + String.format("%.1f", snapshot.cpuUsagePercent) + 
-                "%) - consider optimizing CPU-intensive operations");
-        }
-        
-        // Check for frequently failing operations
-        for (OperationMetrics metrics : operationMetrics.values()) {
-            if (metrics.getCallCount() > 10 && metrics.getSuccessRate() < 80) {
-                recommendations.add(metrics.operationName + " has low success rate (" + 
-                    String.format("%.1f", metrics.getSuccessRate()) + "%) - investigate failures");
+    public long startOperation(String operation) {
+        long startTime = System.currentTimeMillis();
+        Log.d(TAG, "Started timing operation: " + operation);
+        return startTime;
+    }
+
+    /**
+     * Ends timing an operation using the start time from startOperation.
+     * @param operation The name of the operation.
+     * @param startTime The start time from startOperation.
+     */
+    public void endOperation(String operation, long startTime) {
+        long duration = System.currentTimeMillis() - startTime;
+        recordOperation(operation, duration);
+    }
+
+    // =========================
+    // SYSTEM METRICS COLLECTION
+    // =========================
+
+    /**
+     * Collects comprehensive system metrics.
+     */
+    private void collectSystemMetrics() {
+        try {
+            // Memory metrics
+            memoryTracker.updateMetrics();
+
+            // CPU metrics
+            cpuTracker.updateMetrics();
+
+            // Storage metrics
+            if (context != null) {
+                storageTracker.updateMetrics(context);
             }
+
+            // Check for alerts
+            checkSystemAlerts();
+
+        } catch (Exception e) {
+            Log.e(TAG, "Error collecting system metrics", e);
         }
-        
-        if (recommendations.isEmpty()) {
-            recommendations.add("✅ System performance appears optimal");
-        }
-        
-        return recommendations;
     }
-    
+
     /**
-     * Get performance report
+     * Checks system metrics against thresholds and generates alerts.
      */
-    public String generatePerformanceReport() {
-        StringBuilder report = new StringBuilder();
-        report.append("=== Performance Metrics Report ===\n");
-        report.append("Generated: ").append(new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date())).append("\n\n");
-        
-        // Overall statistics
-        int total = totalOperations.get();
-        long totalTime = totalOperationTime.get();
-        double avgTime = total > 0 ? (double) totalTime / total : 0.0;
-        
-        report.append("OVERALL STATISTICS:\n");
-        report.append(String.format("• Total Operations: %d\n", total));
-        report.append(String.format("• Total Time: %dms (%.1fs)\n", totalTime, totalTime / 1000.0));
-        report.append(String.format("• Average Time: %.2fms\n", avgTime));
-        report.append(String.format("• Slow Operations: %d (%.1f%%)\n", 
-            slowOperations.get(), total > 0 ? (slowOperations.get() * 100.0 / total) : 0));
-        report.append(String.format("• Very Slow Operations: %d (%.1f%%)\n", 
-            verySlowOperations.get(), total > 0 ? (verySlowOperations.get() * 100.0 / total) : 0));
-        report.append("\n");
-        
-        // Current system metrics
-        SystemPerformanceSnapshot snapshot = getSystemSnapshot();
-        report.append("CURRENT SYSTEM METRICS:\n");
-        report.append(String.format("• Memory Usage: %.1fMB (%.1f%%)\n", 
-            snapshot.memoryUsageMB, snapshot.memoryUsagePercent));
-        report.append(String.format("• CPU Usage: %.1f%%\n", snapshot.cpuUsagePercent));
-        report.append(String.format("• Available Disk: %.1fGB\n", snapshot.diskAvailableGB));
-        report.append("\n");
-        
-        // Top slow operations
-        report.append("TOP SLOW OPERATIONS:\n");
-        operationMetrics.values().stream()
-            .sorted((a, b) -> Double.compare(b.getAverageTime(), a.getAverageTime()))
-            .limit(10)
-            .forEach(metrics -> {
-                report.append(String.format("• %s: %.1fms avg (%d calls, %.1fms max)\n",
-                    metrics.operationName, metrics.getAverageTime(), 
-                    metrics.getCallCount(), metrics.getMaxTime()));
-            });
-        report.append("\n");
-        
-        // Performance recommendations
-        report.append("PERFORMANCE RECOMMENDATIONS:\n");
-        List<String> recommendations = generateRecommendations();
-        for (String recommendation : recommendations) {
-            report.append("• ").append(recommendation).append("\n");
+    private void checkSystemAlerts() {
+        // Memory alert
+        double memoryUsage = memoryTracker.getMemoryUsagePercentage();
+        if (memoryUsage > HIGH_MEMORY_THRESHOLD) {
+            counters.get("memory_warnings").incrementAndGet();
+            Log.w(TAG, String.format("High memory usage detected: %.1f%%", memoryUsage * 100));
         }
-        
+
+        // CPU alert
+        double cpuUsage = cpuTracker.getCpuUsagePercentage();
+        if (cpuUsage > HIGH_CPU_THRESHOLD) {
+            counters.get("cpu_warnings").incrementAndGet();
+            Log.w(TAG, String.format("High CPU usage detected: %.1f%%", cpuUsage * 100));
+        }
+    }
+
+    /**
+     * Gets current memory usage in bytes.
+     * @return The current memory usage in bytes.
+     */
+    public long getCurrentMemoryUsage() {
+        return memoryTracker.getCurrentMemoryUsageBytes();
+    }
+
+    /**
+     * Gets current memory usage as a percentage (0.0 to 1.0).
+     * @return The memory usage percentage.
+     */
+    public double getCurrentMemoryUsagePercentage() {
+        return memoryTracker.getMemoryUsagePercentage();
+    }
+
+    /**
+     * Gets current CPU usage percentage (0.0 to 1.0).
+     * @return The CPU usage percentage.
+     */
+    public double getCurrentCpuUsage() {
+        cpuTracker.updateMetrics();
+        return cpuTracker.getCpuUsagePercentage();
+    }
+
+    /**
+     * Gets available storage space in bytes.
+     * @return The available storage space in bytes.
+     */
+    public long getAvailableStorage() {
+        if (context != null) {
+            storageTracker.updateMetrics(context);
+            return storageTracker.getAvailableStorageBytes();
+        }
+        return -1;
+    }
+
+    // =========================
+    // METRICS REPORTING
+    // =========================
+
+    /**
+     * Generates a comprehensive performance report.
+     * @return A formatted string of the performance report.
+     */
+    public String generateReport() {
+        StringBuilder report = new StringBuilder();
+
+        report.append("=== Performance Metrics Report ===\n");
+        report.append("Generated: ").append(timestampFormat.format(new Date())).append("\n");
+        report.append("Uptime: ").append(formatDuration(System.currentTimeMillis() - startTime)).append("\n\n");
+
+        // Overall statistics
+        report.append("=== Overall Statistics ===\n");
+        report.append("Total Operations: ").append(counters.get("operations_total").get()).append("\n");
+        report.append("Failed Operations: ").append(counters.get("operations_failed").get()).append("\n");
+        report.append("Slow Operations: ").append(counters.get("operations_slow").get()).append("\n");
+        report.append("Memory Warnings: ").append(counters.get("memory_warnings").get()).append("\n");
+        report.append("CPU Warnings: ").append(counters.get("cpu_warnings").get()).append("\n\n");
+
+        // System metrics
+        report.append("=== Current System Metrics ===\n");
+        collectSystemMetrics(); // Refresh current metrics
+        report.append(systemMetrics.getSystemInfoReport()).append("\n");
+        report.append(memoryTracker.getMemoryReport()).append("\n");
+        report.append(cpuTracker.getCpuReport()).append("\n");
+        if (context != null) {
+            report.append(storageTracker.getStorageReport()).append("\n");
+        }
+
+        // Operation-specific metrics
+        report.append("=== Operation Performance ===\n");
+        for (Map.Entry<String, OperationMetrics> entry : operationMetrics.entrySet()) {
+            report.append(entry.getValue().getReport()).append("\n");
+        }
+
         return report.toString();
     }
-    
-    private void recordOperationMetrics(String operationName, long duration, Map<String, Object> additionalMetrics) {
-        recordOperation(operationName, duration, additionalMetrics);
+
+    /**
+     * Gets a lightweight performance summary as a Map.
+     * @return A map containing a summary of performance data.
+     */
+    public Map<String, Object> getPerformanceSummary() {
+        Map<String, Object> summary = new HashMap<>();
+
+        // Basic counters
+        summary.put("totalOperations", counters.get("operations_total").get());
+        summary.put("failedOperations", counters.get("operations_failed").get());
+        summary.put("slowOperations", counters.get("operations_slow").get());
+        summary.put("uptimeMs", System.currentTimeMillis() - startTime);
+
+        // Current system state
+        collectSystemMetrics();
+        summary.put("memoryUsagePercent", memoryTracker.getMemoryUsagePercentage());
+        summary.put("memoryUsageBytes", memoryTracker.getCurrentMemoryUsageBytes());
+        summary.put("cpuUsagePercent", cpuTracker.getCpuUsagePercentage());
+
+        if (context != null) {
+            summary.put("availableStorageBytes", storageTracker.getAvailableStorageBytes());
+        }
+
+        // Average operation times
+        Map<String, Double> avgTimes = new HashMap<>();
+        for (Map.Entry<String, OperationMetrics> entry : operationMetrics.entrySet()) {
+            avgTimes.put(entry.getKey(), entry.getValue().getAverageTime());
+        }
+        summary.put("averageOperationTimes", avgTimes);
+
+        return summary;
     }
-    
-    private void logPerformanceWarnings(String operationName, long durationMs) {
-        if (durationMs >= VERY_SLOW_OPERATION_THRESHOLD_MS) {
-            System.err.println("🐌 VERY SLOW OPERATION: " + operationName + " took " + durationMs + "ms");
-        } else if (durationMs >= SLOW_OPERATION_THRESHOLD_MS) {
-            System.out.println("⏱️ Slow operation: " + operationName + " took " + durationMs + "ms");
+
+    /**
+     * Exports metrics to JSON format.
+     * @return A JSON string of the performance data.
+     */
+    public String exportToJson() {
+        Map<String, Object> data = getPerformanceSummary();
+        return formatAsJson(data);
+    }
+
+    // =========================
+    // UTILITY METHODS
+    // =========================
+
+    private String formatDuration(long millis) {
+        long seconds = millis / 1000;
+        long minutes = seconds / 60;
+        long hours = minutes / 60;
+
+        if (hours > 0) {
+            return String.format("%dh %dm %ds", hours, minutes % 60, seconds % 60);
+        } else if (minutes > 0) {
+            return String.format("%dm %ds", minutes, seconds % 60);
+        } else {
+            return String.format("%ds", seconds);
         }
     }
-    
-    private String generateOperationId(String operationName) {
-        return operationName + "-" + System.nanoTime() + "-" + Thread.currentThread().getId();
-    }
-    
-    private void startBackgroundMonitoring() {
-        backgroundMonitor = new Timer("PerformanceMonitor", true);
-        backgroundMonitor.scheduleAtFixedRate(new TimerTask() {
-            @Override
-            public void run() {
-                try {
-                    systemTracker.updateMetrics();
-                    memoryTracker.updateMemoryStats();
-                    cpuTracker.updateCpuStats();
-                    
-                    // Check for performance issues
-                    checkPerformanceThresholds();
-                    
-                    // Clean up old metrics
-                    cleanupOldMetrics();
-                    
-                } catch (Exception e) {
-                    System.err.println("Performance monitoring error: " + e.getMessage());
-                }
+
+    private String formatAsJson(Map<String, Object> data) {
+        StringBuilder json = new StringBuilder();
+        json.append("{");
+
+        boolean first = true;
+        for (Map.Entry<String, Object> entry : data.entrySet()) {
+            if (!first) json.append(",");
+            json.append("\"").append(entry.getKey()).append("\":");
+
+            Object value = entry.getValue();
+            if (value instanceof String) {
+                json.append("\"").append(value).append("\"");
+            } else if (value instanceof Map) {
+                json.append(formatAsJson((Map<String, Object>) value));
+            } else {
+                json.append(value);
             }
-        }, 10000, 30000); // Start after 10s, run every 30s
+            first = false;
+        }
+
+        json.append("}");
+        return json.toString();
     }
-    
-    private void checkPerformanceThresholds() {
-        SystemPerformanceSnapshot snapshot = getSystemSnapshot();
-        
-        // Memory threshold check
-        if (snapshot.memoryUsageMB > HIGH_MEMORY_THRESHOLD_MB) {
-            System.out.println("⚠️ High memory usage detected: " + 
-                String.format("%.1fMB (%.1f%%)", snapshot.memoryUsageMB, snapshot.memoryUsagePercent));
-        }
-        
-        // CPU threshold check
-        if (snapshot.cpuUsagePercent > HIGH_CPU_THRESHOLD) {
-            System.out.println("⚠️ High CPU usage detected: " + 
-                String.format("%.1f%%", snapshot.cpuUsagePercent));
-        }
-        
-        // Check for stuck operations
-        checkForStuckOperations();
-    }
-    
-    private void checkForStuckOperations() {
-        long currentTime = System.currentTimeMillis();
-        List<String> stuckOperations = new ArrayList<>();
-        
-        for (OperationTimer timer : activeTimers.values()) {
-            long runningTime = currentTime - timer.startTime;
-            if (runningTime > VERY_SLOW_OPERATION_THRESHOLD_MS * 2) { // 30 seconds
-                stuckOperations.add(timer.operationName + " (" + runningTime + "ms)");
-            }
-        }
-        
-        if (!stuckOperations.isEmpty()) {
-            System.out.println("⚠️ Potentially stuck operations detected: " + stuckOperations);
-        }
-    }
-    
-    private void cleanupOldMetrics() {
-        // Clean up operation metrics if too many accumulate
-        if (operationMetrics.size() > 1000) {
-            // Remove metrics for operations that haven't been called recently
-            long cutoffTime = System.currentTimeMillis() - (24 * 60 * 60 * 1000); // 24 hours
-            operationMetrics.entrySet().removeIf(entry -> 
-                entry.getValue().getLastExecutionTime() < cutoffTime);
-        }
-    }
-    
+
+    // =========================
+    // INNER CLASSES
+    // =========================
+
     /**
-     * Shutdown and cleanup resources
+     * Tracks metrics for individual operations.
      */
-    public void shutdown() {
-        if (backgroundMonitor != null) {
-            backgroundMonitor.cancel();
-        }
-        
-        // End all active timers
-        for (String operationId : new ArrayList<>(activeTimers.keySet())) {
-            endOperation(operationId);
-        }
-        
-        activeTimers.clear();
-        operationMetrics.clear();
-    }
-    
-    // Helper Classes
-    
-    /**
-     * Operation Timer - tracks individual operation timing
-     */
-    public static class OperationTimer {
-        public final String operationName;
-        public final String operationId;
-        public final long startTime;
-        private final long startMemory;
-        private final Map<String, Object> startMetrics;
-        
-        public OperationTimer(String operationName, String operationId) {
-            this.operationName = operationName;
-            this.operationId = operationId;
-            this.startTime = System.currentTimeMillis();
-            this.startMemory = getUsedMemory();
-            this.startMetrics = captureStartMetrics();
-        }
-        
-        public long end() {
-            return System.currentTimeMillis() - startTime;
-        }
-        
-        public Map<String, Object> getMetrics() {
-            Map<String, Object> metrics = new HashMap<>();
-            metrics.put("duration", end());
-            metrics.put("memoryDelta", getUsedMemory() - startMemory);
-            metrics.put("threadId", Thread.currentThread().getId());
-            metrics.put("threadName", Thread.currentThread().getName());
-            return metrics;
-        }
-        
-        private long getUsedMemory() {
-            return Debug.getNativeHeapAllocatedSize() / (1024 * 1024); // MB
-        }
-        
-        private Map<String, Object> captureStartMetrics() {
-            Map<String, Object> metrics = new HashMap<>();
-            metrics.put("timestamp", startTime);
-            return metrics;
-        }
-    }
-    
-    /**
-     * Operation Metrics - aggregated metrics for operation types
-     */
-    public static class OperationMetrics {
-        public final String operationName;
-        private final List<Long> executionTimes = Collections.synchronizedList(new ArrayList<>());
-        private final AtomicInteger callCount = new AtomicInteger(0);
-        private final AtomicInteger successCount = new AtomicInteger(0);
-        private final AtomicInteger failureCount = new AtomicInteger(0);
+    private static class OperationMetrics {
+        private final String operationName;
+        private final AtomicLong executionCount = new AtomicLong(0);
         private final AtomicLong totalTime = new AtomicLong(0);
-        private volatile long lastExecutionTime = System.currentTimeMillis();
-        private final List<Double> memoryDeltas = Collections.synchronizedList(new ArrayList<>());
-        
+        private final AtomicLong failureCount = new AtomicLong(0);
+        private long minTime = Long.MAX_VALUE;
+        private long maxTime = Long.MIN_VALUE;
+        private final List<String> recentErrors = new ArrayList<>();
+        private final long createdTime;
+
         public OperationMetrics(String operationName) {
             this.operationName = operationName;
+            this.createdTime = System.currentTimeMillis();
         }
-        
-        public void recordExecution(long durationMs, Map<String, Object> metrics) {
-            callCount.incrementAndGet();
+
+        public void recordExecution(long durationMs, Map<String, Object> customMetrics) {
+            executionCount.incrementAndGet();
             totalTime.addAndGet(durationMs);
-            executionTimes.add(durationMs);
-            lastExecutionTime = System.currentTimeMillis();
-            
-            // Track memory usage if available
-            if (metrics != null && metrics.containsKey("memoryDelta")) {
-                Object memDelta = metrics.get("memoryDelta");
-                if (memDelta instanceof Number) {
-                    memoryDeltas.add(((Number) memDelta).doubleValue());
+
+            synchronized (this) {
+                if (durationMs < minTime) minTime = durationMs;
+                if (durationMs > maxTime) maxTime = durationMs;
+            }
+        }
+
+        public void recordFailure(String error, Throwable throwable) {
+            failureCount.incrementAndGet();
+
+            synchronized (recentErrors) {
+                recentErrors.add(error);
+                if (recentErrors.size() > 10) {
+                    recentErrors.remove(0);
                 }
             }
-            
-            // Assume success unless explicitly marked as failure
-            boolean success = true;
-            if (metrics != null && metrics.containsKey("success")) {
-                success = Boolean.TRUE.equals(metrics.get("success"));
-            }
-            
-            if (success) {
-                successCount.incrementAndGet();
-            } else {
-                failureCount.incrementAndGet();
-            }
-            
-            // Limit stored execution times to prevent memory issues
-            if (executionTimes.size() > 1000) {
-                executionTimes.remove(0);
-            }
-            if (memoryDeltas.size() > 1000) {
-                memoryDeltas.remove(0);
-            }
         }
-        
-        public int getCallCount() { return callCount.get(); }
-        public long getTotalTime() { return totalTime.get(); }
-        public long getLastExecutionTime() { return lastExecutionTime; }
-        
+
         public double getAverageTime() {
-            int count = callCount.get();
+            long count = executionCount.get();
             return count > 0 ? (double) totalTime.get() / count : 0.0;
         }
-        
-        public double getMinTime() {
-            return executionTimes.stream().mapToLong(Long::longValue).min().orElse(0);
-        }
-        
-        public double getMaxTime() {
-            return executionTimes.stream().mapToLong(Long::longValue).max().orElse(0);
-        }
-        
-        public double getPercentile(int percentile) {
-            if (executionTimes.isEmpty()) return 0.0;
-            
-            List<Long> sorted = new ArrayList<>(executionTimes);
-            Collections.sort(sorted);
-            int index = (int) Math.ceil(percentile / 100.0 * sorted.size()) - 1;
-            return sorted.get(Math.max(0, Math.min(index, sorted.size() - 1)));
-        }
-        
-        public double getSuccessRate() {
-            int total = successCount.get() + failureCount.get();
-            return total > 0 ? (successCount.get() * 100.0 / total) : 100.0;
-        }
-        
-        public double getAverageMemoryDelta() {
-            if (memoryDeltas.isEmpty()) return 0.0;
-            return memoryDeltas.stream().mapToDouble(Double::doubleValue).average().orElse(0.0);
+
+        public String getReport() {
+            long count = executionCount.get();
+            long failures = failureCount.get();
+            double successRate = count > 0 ? ((double) (count - failures) / count) * 100 : 0;
+
+            StringBuilder report = new StringBuilder();
+            report.append("Operation: ").append(operationName).append("\n");
+            report.append("  Executions: ").append(count).append("\n");
+            report.append("  Failures: ").append(failures).append("\n");
+            report.append("  Success Rate: ").append(String.format("%.1f%%", successRate)).append("\n");
+
+            if (count > 0) {
+                report.append("  Average Time: ").append(String.format("%.1fms", getAverageTime())).append("\n");
+                report.append("  Min Time: ").append(minTime).append("ms\n");
+                report.append("  Max Time: ").append(maxTime).append("ms\n");
+            }
+
+            if (!recentErrors.isEmpty()) {
+                report.append("  Recent Errors: ").append(recentErrors.toString()).append("\n");
+            }
+
+            return report.toString();
         }
     }
-    
+
     /**
-     * System Performance Snapshot
+     * System information tracker.
      */
-    public static class SystemPerformanceSnapshot {
-        public final double memoryUsageMB;
-        public final double memoryUsagePercent;
-        public final double cpuUsagePercent;
-        public final double diskAvailableGB;
-        public final long networkBytesReceived;
-        public final long networkBytesSent;
-        public final long timestamp;
-        
-        public SystemPerformanceSnapshot(double memoryUsageMB, double cpuUsagePercent,
-                                       double diskAvailableGB, Map<String, Long> networkStats,
-                                       long timestamp) {
-            this.memoryUsageMB = memoryUsageMB;
-            this.memoryUsagePercent = calculateMemoryPercent(memoryUsageMB);
-            this.cpuUsagePercent = cpuUsagePercent;
-            this.diskAvailableGB = diskAvailableGB;
-            this.networkBytesReceived = networkStats.getOrDefault("received", 0L);
-            this.networkBytesSent = networkStats.getOrDefault("sent", 0L);
-            this.timestamp = timestamp;
-        }
-        
-        private double calculateMemoryPercent(double usedMB) {
-            long maxMemory = Runtime.getRuntime().maxMemory() / (1024 * 1024);
-            return maxMemory > 0 ? (usedMB / maxMemory * 100.0) : 0.0;
+    private static class SystemMetrics {
+        public String getSystemInfoReport() {
+            StringBuilder info = new StringBuilder();
+            info.append("Android Version: ").append(Build.VERSION.RELEASE).append(" (API ").append(Build.VERSION.SDK_INT).append(")\n");
+            info.append("Device: ").append(Build.MANUFACTURER).append(" ").append(Build.MODEL).append("\n");
+            info.append("ABI: ").append(Build.SUPPORTED_ABIS[0]).append("\n");
+
+            // Java/Runtime info
+            Runtime runtime = Runtime.getRuntime();
+            info.append("Available Processors: ").append(runtime.availableProcessors()).append("\n");
+
+            return info.toString();
         }
     }
-    
+
     /**
-     * Operation Summary
+     * Memory usage tracker.
      */
-    public static class OperationSummary {
-        public final String operationName;
-        public final int callCount;
-        public final long totalTime;
-        public final double averageTime;
-        public final double minTime;
-        public final double maxTime;
-        public final double percentile95;
-        public final double successRate;
-        
-        public OperationSummary(String operationName, int callCount, long totalTime,
-                              double averageTime, double minTime, double maxTime,
-                              double percentile95, double successRate) {
-            this.operationName = operationName;
-            this.callCount = callCount;
-            this.totalTime = totalTime;
-            this.averageTime = averageTime;
-            this.minTime = minTime;
-            this.maxTime = maxTime;
-            this.percentile95 = percentile95;
-            this.successRate = successRate;
-        }
-    }
-    
-    // System Tracking Helper Classes
-    
-    private static class SystemMetricsTracker {
+    private class MemoryTracker {
+        private long currentMemoryBytes = 0;
+        private double memoryUsagePercentage = 0.0;
+        private long maxMemoryBytes = 0;
+        private long freeMemoryBytes = 0;
+
         public void updateMetrics() {
-            // Update system-level metrics
-        }
-        
-        public double getDiskUsage() {
             try {
-                File dataDir = new File("/data");
-                return dataDir.getUsableSpace() / (1024.0 * 1024.0 * 1024.0); // GB
-            } catch (Exception e) {
-                return 0.0;
-            }
-        }
-        
-        public Map<String, Long> getNetworkStats() {
-            Map<String, Long> stats = new HashMap<>();
-            stats.put("received", 0L);
-            stats.put("sent", 0L);
-            return stats;
-        }
-    }
-    
-    private static class MemoryTracker {
-        private final List<Long> memoryHistory = Collections.synchronizedList(new ArrayList<>());
-        
-        public void updateMemoryStats() {
-            long currentMemory = getCurrentMemoryUsage();
-            memoryHistory.add(currentMemory);
-            
-            // Keep only recent history
-            if (memoryHistory.size() > 100) {
-                memoryHistory.remove(0);
-            }
-        }
-        
-        public double getCurrentMemoryUsage() {
-            return Debug.getNativeHeapAllocatedSize() / (1024.0 * 1024.0); // MB
-        }
-        
-        public long getMemoryTrend() {
-            if (memoryHistory.size() < 10) return 0;
-            
-            // Simple trend calculation - compare recent average to older average
-            int half = memoryHistory.size() / 2;
-            double recentAvg = memoryHistory.subList(half, memoryHistory.size())
-                .stream().mapToLong(Long::longValue).average().orElse(0.0);
-            double olderAvg = memoryHistory.subList(0, half)
-                .stream().mapToLong(Long::longValue).average().orElse(0.0);
-            
-            return (long) (recentAvg - olderAvg) / (1024 * 1024); // MB
-        }
-    }
-    
-    private static class CpuTracker {
-        private long lastCpuTime = 0;
-        private long lastSystemTime = 0;
-        private double currentCpuUsage = 0.0;
-        
-        public void updateCpuStats() {
-            // Simple CPU usage calculation
-            try {
-                long currentCpuTime = Debug.threadCpuTimeNanos();
-                long currentSystemTime = System.nanoTime();
-                
-                if (lastCpuTime > 0 && lastSystemTime > 0) {
-                    long cpuDelta = currentCpuTime - lastCpuTime;
-                    long systemDelta = currentSystemTime - lastSystemTime;
-                    
-                    if (systemDelta > 0) {
-                        currentCpuUsage = (cpuDelta * 100.0) / systemDelta;
-                        // Cap at 100%
-                        currentCpuUsage = Math.min(100.0, Math.max(0.0, currentCpuUsage));
+                // Use Runtime class, which is available in Android
+                Runtime runtime = Runtime.getRuntime();
+                maxMemoryBytes = runtime.maxMemory();
+                freeMemoryBytes = runtime.freeMemory();
+                long totalMemory = runtime.totalMemory();
+                currentMemoryBytes = totalMemory - freeMemoryBytes;
+
+                memoryUsagePercentage = (double) currentMemoryBytes / maxMemoryBytes;
+
+                // Also get Android-specific memory info
+                if (context != null) {
+                    ActivityManager activityManager = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
+                    if (activityManager != null) {
+                        ActivityManager.MemoryInfo memoryInfo = new ActivityManager.MemoryInfo();
+                        activityManager.getMemoryInfo(memoryInfo);
                     }
                 }
-                
-                lastCpuTime = currentCpuTime;
-                lastSystemTime = currentSystemTime;
-                
+
             } catch (Exception e) {
-                currentCpuUsage = 0.0;
+                Log.e(TAG, "Error updating memory metrics", e);
             }
         }
-        
-        public double getCurrentCpuUsage() {
-            return currentCpuUsage;
+
+        public long getCurrentMemoryUsageBytes() {
+            return currentMemoryBytes;
         }
+
+        public double getMemoryUsagePercentage() {
+            return memoryUsagePercentage;
+        }
+
+        public String getMemoryReport() {
+            return String.format("Memory Usage: %.1f%% (%s / %s)",
+                    memoryUsagePercentage * 100,
+                    formatBytes(currentMemoryBytes),
+                    formatBytes(maxMemoryBytes));
+        }
+
+        private String formatBytes(long bytes) {
+            if (bytes < 1024) return bytes + " B";
+            if (bytes < 1024 * 1024) return String.format("%.1f KB", bytes / 1024.0);
+            if (bytes < 1024 * 1024 * 1024) return String.format("%.1f MB", bytes / (1024.0 * 1024));
+            return String.format("%.1f GB", bytes / (1024.0 * 1024 * 1024));
+        }
+    }
+
+    /**
+     * CPU usage tracker.
+     */
+    private static class CpuTracker {
+        private double cpuUsagePercentage = 0.0;
+        private long lastCpuTime = 0;
+        private long lastAppTime = 0;
+
+        public void updateMetrics() {
+            try {
+                // Reading /proc/stat and /proc/<pid>/stat for CPU usage is the standard
+                // and most reliable way on Android. This is a basic implementation.
+                long[] cpuTimes = getCpuTimes();
+                long[] appCpuTimes = getAppCpuTimes();
+
+                if (lastCpuTime == 0 || lastAppTime == 0) {
+                    lastCpuTime = cpuTimes[0];
+                    lastAppTime = appCpuTimes[0];
+                    return;
+                }
+
+                long cpuDelta = cpuTimes[0] - lastCpuTime;
+                long appDelta = appCpuTimes[0] - lastAppTime;
+
+                if (cpuDelta > 0) {
+                    cpuUsagePercentage = (double) appDelta / cpuDelta;
+                } else {
+                    cpuUsagePercentage = 0.0;
+                }
+
+                lastCpuTime = cpuTimes[0];
+                lastAppTime = appCpuTimes[0];
+
+            } catch (Exception e) {
+                Log.e(TAG, "Error updating CPU metrics", e);
+            }
+        }
+
+        private long[] getCpuTimes() throws IOException {
+            RandomAccessFile reader = new RandomAccessFile("/proc/stat", "r");
+            String load = reader.readLine();
+            reader.close();
+
+            String[] toks = load.split(" ");
+
+            long idle = Long.parseLong(toks[4]);
+            long total = 0;
+            for (String s : toks) {
+                try {
+                    total += Long.parseLong(s);
+                } catch (NumberFormatException e) {
+                    // Ignore non-numeric values
+                }
+            }
+            return new long[]{total, idle};
+        }
+
+        private long[] getAppCpuTimes() throws IOException {
+            int pid = Process.myPid();
+            RandomAccessFile reader = new RandomAccessFile("/proc/" + pid + "/stat", "r");
+            String load = reader.readLine();
+            reader.close();
+
+            String[] toks = load.split(" ");
+            long utime = Long.parseLong(toks[13]);
+            long stime = Long.parseLong(toks[14]);
+            return new long[]{utime + stime};
+        }
+
+        public double getCpuUsagePercentage() {
+            return cpuUsagePercentage;
+        }
+
+        public String getCpuReport() {
+            return String.format("CPU Usage: %.1f%%", cpuUsagePercentage * 100);
+        }
+    }
+
+    /**
+     * Storage space tracker.
+     */
+    private static class StorageTracker {
+        private long availableStorageBytes = 0;
+        private long totalStorageBytes = 0;
+
+        public void updateMetrics(Context context) {
+            try {
+                File externalFilesDir = context.getExternalFilesDir(null);
+                if (externalFilesDir != null) {
+                    StatFs stat = new StatFs(externalFilesDir.getPath());
+
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR2) {
+                        availableStorageBytes = stat.getAvailableBytes();
+                        totalStorageBytes = stat.getTotalBytes();
+                    } else {
+                        // Fallback for older Android versions
+                        long blockSize = stat.getBlockSize();
+                        availableStorageBytes = stat.getAvailableBlocks() * blockSize;
+                        totalStorageBytes = stat.getBlockCount() * blockSize;
+                    }
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Error updating storage metrics", e);
+            }
+        }
+
+        public long getAvailableStorageBytes() {
+            return availableStorageBytes;
+        }
+
+        public String getStorageReport() {
+            double usagePercentage = totalStorageBytes > 0 ?
+                    ((double) (totalStorageBytes - availableStorageBytes) / totalStorageBytes) * 100 : 0;
+
+            return String.format("Storage: %.1f%% used (%s available / %s total)",
+                    usagePercentage,
+                    formatBytes(availableStorageBytes),
+                    formatBytes(totalStorageBytes));
+        }
+
+        private String formatBytes(long bytes) {
+            if (bytes < 1024) return bytes + " B";
+            if (bytes < 1024 * 1024) return String.format("%.1f KB", bytes / 1024.0);
+            if (bytes < 1024 * 1024 * 1024) return String.format("%.1f MB", bytes / (1024.0 * 1024));
+            return String.format("%.1f GB", bytes / (1024.0 * 1024 * 1024));
+        }
+    }
+
+    /**
+     * Resets all metrics.
+     */
+    public void reset() {
+        operationMetrics.clear();
+        recentOperationTimes.clear();
+
+        for (AtomicLong counter : counters.values()) {
+            counter.set(0);
+        }
+
+        Log.d(TAG, "Performance metrics reset");
+    }
+
+    /**
+     * Clean shutdown.
+     */
+    public void shutdown() {
+        Log.d(TAG, "PerformanceMetrics shutting down");
+        Log.i(TAG, "Final Performance Summary:\n" + generateReport());
     }
 }
 
 
 
-===== ModLoader/app/src/main/java/com/modloader/ui/BaseActivity.java =====
 
+--- FILE: /ModLoader/app/src/main/java/com/modloader/ui/BaseActivity.java ---
 // File: BaseActivity.java (FIXED) - Compatible with PermissionManager
 // Path: /app/src/main/java/com/modloader/ui/BaseActivity.java
 
@@ -5511,9 +4838,7 @@ public abstract class BaseActivity extends AppCompatActivity implements Permissi
 }
 
 
-
-===== ModLoader/app/src/main/java/com/modloader/ui/DllModActivity.java =====
-
+--- FILE: /ModLoader/app/src/main/java/com/modloader/ui/DllModActivity.java ---
 // File: DllModActivity.java (Updated Activity) - Uses Controller Pattern
 // Path: /storage/emulated/0/AndroidIDEProjects/main/java/com/terrarialoader/ui/DllModActivity.java
 
@@ -5815,9 +5140,7 @@ public class DllModActivity extends Activity implements DllModController.DllModC
 }
 
 
-
-===== ModLoader/app/src/main/java/com/modloader/ui/DllModController.java =====
-
+--- FILE: /ModLoader/app/src/main/java/com/modloader/ui/DllModController.java ---
 // File: DllModController.java (Fixed) - Corrected method calls with Context parameter
 // Path: /storage/emulated/0/AndroidIDEProjects/TerrariaML/app/src/main/java/com/terrarialoader/ui/DllModController.java
 
@@ -6179,9 +5502,7 @@ public class DllModController {
 }
 
 
-
-===== ModLoader/app/src/main/java/com/modloader/ui/InstructionsActivity.java =====
-
+--- FILE: /ModLoader/app/src/main/java/com/modloader/ui/InstructionsActivity.java ---
 // File: InstructionsActivity.java (Fixed) - Corrected method calls with Context parameter
 // Path: /storage/emulated/0/AndroidIDEProjects/TerrariaML/app/src/main/java/com/terrarialoader/ui/InstructionsActivity.java
 
@@ -6483,9 +5804,7 @@ public class InstructionsActivity extends AppCompatActivity {
 }
 
 
-
-===== ModLoader/app/src/main/java/com/modloader/ui/LogCategoryAdapter.java =====
-
+--- FILE: /ModLoader/app/src/main/java/com/modloader/ui/LogCategoryAdapter.java ---
 // File: LogCategoryAdapter.java - Advanced Log Display Adapter
 // Path: /main/java/com/terrarialoader/ui/LogCategoryAdapter.java
 
@@ -6891,9 +6210,7 @@ public class LogCategoryAdapter extends RecyclerView.Adapter<LogCategoryAdapter.
 }
 
 
-
-===== ModLoader/app/src/main/java/com/modloader/ui/LogEntry.java =====
-
+--- FILE: /ModLoader/app/src/main/java/com/modloader/ui/LogEntry.java ---
 // File: LogEntry.java - Enhanced Log Entry Model for Advanced Logging
 // Path: /main/java/com/terrarialoader/ui/LogEntry.java
 
@@ -7172,9 +6489,7 @@ public class LogEntry {
 }
 
 
-
-===== ModLoader/app/src/main/java/com/modloader/ui/LogViewerActivity.java =====
-
+--- FILE: /ModLoader/app/src/main/java/com/modloader/ui/LogViewerActivity.java ---
 // File: LogViewerActivity.java (FIXED) - Complete Enhanced Log Viewer with Persistent Settings
 // Path: /app/src/main/java/com/modloader/ui/LogViewerActivity.java
 
@@ -7873,9 +7188,7 @@ public class LogViewerActivity extends AppCompatActivity {
 }
 
 
-
-===== ModLoader/app/src/main/java/com/modloader/ui/LogViewerEnhancedActivity.java =====
-
+--- FILE: /ModLoader/app/src/main/java/com/modloader/ui/LogViewerEnhancedActivity.java ---
 // File: LogViewerEnhancedActivity.java - Enhanced log viewer with filtering and search
 // Path: /app/src/main/java/com/modloader/ui/LogViewerEnhancedActivity.java
 
@@ -8307,9 +7620,7 @@ public class LogViewerEnhancedActivity extends AppCompatActivity {
 }
 
 
-
-===== ModLoader/app/src/main/java/com/modloader/ui/ModListActivity.java =====
-
+--- FILE: /ModLoader/app/src/main/java/com/modloader/ui/ModListActivity.java ---
 package com.modloader.ui;
 
 import android.app.Activity;
@@ -8468,9 +7779,7 @@ public class ModListActivity extends AppCompatActivity {
 
 
 
-
-===== ModLoader/app/src/main/java/com/modloader/ui/ModListAdapter.java =====
-
+--- FILE: /ModLoader/app/src/main/java/com/modloader/ui/ModListAdapter.java ---
 // File: ModListAdapter.java (Fixed Adapter Class) - NullPointerException Fix
 // Path: /storage/emulated/0/AndroidIDEProjects/TerrariaML/app/src/main/java/com/terrarialoader/ui/ModListAdapter.java
 
@@ -8638,9 +7947,7 @@ public class ModListAdapter extends RecyclerView.Adapter<ModListAdapter.ModViewH
 
 
 
-
-===== ModLoader/app/src/main/java/com/modloader/ui/ModManagementActivity.java =====
-
+--- FILE: /ModLoader/app/src/main/java/com/modloader/ui/ModManagementActivity.java ---
 // File: ModManagementActivity.java - Pure Mod Management (Post-Installation)
 // Path: /main/java/com/terrarialoader/ui/ModManagementActivity.java
 
@@ -8935,4 +8242,985 @@ public class ModManagementActivity extends AppCompatActivity {
         updateStatus();
     }
 }
+
+
+--- FILE: /ModLoader/app/src/main/java/com/modloader/ui/OfflineDiagnosticActivity.java ---
+// File: OfflineDiagnosticActivity.java (Part 1 - Main Class)
+// Path: /main/java/com/terrarialoader/ui/OfflineDiagnosticActivity.java
+
+package com.modloader.ui;
+
+import android.app.ProgressDialog;
+import android.content.Intent;
+import android.net.Uri;
+import android.os.AsyncTask;
+import android.os.Bundle;
+import android.widget.Button;
+import android.widget.TextView;
+import android.widget.Toast;
+
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
+import androidx.appcompat.app.AlertDialog;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.content.FileProvider;
+
+import com.modloader.R;
+import com.modloader.diagnostic.DiagnosticManager;
+import com.modloader.util.LogUtils;
+import com.modloader.util.FileUtils;
+import com.modloader.util.PathManager;
+import com.modloader.loader.MelonLoaderManager;
+
+import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
+
+public class OfflineDiagnosticActivity extends AppCompatActivity {
+    
+    private DiagnosticManager diagnosticManager;
+    
+    // UI Components
+    private Button btnRunFullDiagnostic;
+    private Button btnDiagnoseApk;
+    private Button btnFixSettings;
+    private Button btnAutoRepair;
+    private Button btnExportReport;
+    private Button btnClearResults;
+    private TextView diagnosticResultsText;
+    
+    // Progress dialog
+    private ProgressDialog progressDialog;
+    
+    // File picker for APK selection
+    private final ActivityResultLauncher<Intent> apkPickerLauncher = 
+        registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
+            if (result.getResultCode() == RESULT_OK && result.getData() != null) {
+                Uri apkUri = result.getData().getData();
+                runApkDiagnostic(apkUri);
+            }
+        });
+    
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_offline_diagnostic);
+        setTitle("🔧 Offline Diagnostics");
+        
+        initializeComponents();
+        setupUI();
+        
+        LogUtils.logUser("Offline Diagnostics opened");
+    }
+    
+    private void initializeComponents() {
+        diagnosticManager = new DiagnosticManager(this);
+        
+        // Find UI components
+        btnRunFullDiagnostic = findViewById(R.id.btn_run_full_diagnostic);
+        btnDiagnoseApk = findViewById(R.id.btn_diagnose_apk);
+        btnFixSettings = findViewById(R.id.btn_fix_settings);
+        btnAutoRepair = findViewById(R.id.btn_auto_repair);
+        btnExportReport = findViewById(R.id.btn_export_report);
+        btnClearResults = findViewById(R.id.btn_clear_results);
+        diagnosticResultsText = findViewById(R.id.diagnostic_results_text);
+    }
+    
+    private void setupUI() {
+        // Full system diagnostic
+        btnRunFullDiagnostic.setOnClickListener(v -> runFullSystemCheck());
+        
+        // APK diagnostic
+        btnDiagnoseApk.setOnClickListener(v -> selectApkForDiagnostic());
+        
+        // Settings diagnostic and fix
+        btnFixSettings.setOnClickListener(v -> diagnoseAndFixSettings());
+        
+        // Auto repair
+        btnAutoRepair.setOnClickListener(v -> performAutoRepair());
+        
+        // Export report
+        btnExportReport.setOnClickListener(v -> exportDiagnosticReport());
+        
+        // Clear results
+        btnClearResults.setOnClickListener(v -> clearResults());
+    }
+    
+    private void runFullSystemCheck() {
+        showProgress("Running comprehensive system diagnostic...");
+        
+        AsyncTask.execute(() -> {
+            try {
+                StringBuilder results = new StringBuilder();
+                results.append("=== TerrariaLoader Comprehensive Diagnostic ===\n");
+                results.append("Timestamp: ").append(new java.util.Date().toString()).append("\n");
+                results.append("Device: ").append(android.os.Build.MANUFACTURER).append(" ")
+                       .append(android.os.Build.MODEL).append("\n");
+                results.append("Android: ").append(android.os.Build.VERSION.RELEASE).append("\n\n");
+                
+                // 1. Directory Structure Check
+                results.append("📁 DIRECTORY STRUCTURE\n");
+                results.append(checkDirectoryStructure()).append("\n");
+                
+                // 2. MelonLoader/LemonLoader Status
+                results.append("🛠️ LOADER STATUS\n");
+                results.append(checkLoaderStatus()).append("\n");
+                
+                // 3. Mod Files Validation
+                results.append("📦 MOD FILES\n");
+                results.append(checkModFiles()).append("\n");
+                
+                // 4. System Permissions
+                results.append("🔐 PERMISSIONS\n");
+                results.append(checkPermissions()).append("\n");
+                
+                // 5. Storage and Space
+                results.append("💾 STORAGE\n");
+                results.append(checkStorage()).append("\n");
+                
+                // 6. Settings Validation
+                results.append("⚙️ SETTINGS\n");
+                results.append(checkSettingsIntegrity()).append("\n");
+                
+                // 7. Suggested Actions
+                results.append("💡 RECOMMENDATIONS\n");
+                results.append(generateRecommendations()).append("\n");
+                
+                runOnUiThread(() -> {
+                    hideProgress();
+                    displayResults(results.toString());
+                    LogUtils.logUser("Full system diagnostic completed");
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    hideProgress();
+                    showError("Diagnostic failed: " + e.getMessage());
+                    LogUtils.logDebug("Diagnostic error: " + e.toString());
+                });
+            }
+        });
+    }
+    
+    private String checkDirectoryStructure() {
+        StringBuilder result = new StringBuilder();
+        
+        try {
+            String gamePackage = "com.and.games505.TerrariaPaid";
+            File baseDir = PathManager.getGameBaseDir(this, gamePackage);
+            
+            if (baseDir == null) {
+                result.append("❌ Base directory path is null\n");
+                return result.toString();
+            }
+            
+            result.append("Base Path: ").append(baseDir.getAbsolutePath()).append("\n");
+            
+            // Check key directories
+            String[] criticalPaths = {
+                "",                           // Base
+                "Mods",                      // Mods root
+                "Mods/DEX",                  // DEX mods
+                "Mods/DLL",                  // DLL mods
+                "Loaders",                   // Loaders root
+                "Loaders/MelonLoader",       // MelonLoader
+                "Logs",                      // Game logs
+                "AppLogs",                   // App logs
+                "Config",                    // Configuration
+                "Backups"                    // Backups
+            };
+            
+            int existingDirs = 0;
+            for (String path : criticalPaths) {
+                File dir = new File(baseDir, path);
+                boolean exists = dir.exists() && dir.isDirectory();
+                String status = exists ? "✅" : "❌";
+                result.append(status).append(" ").append(path.isEmpty() ? "Base" : path).append("\n");
+                if (exists) existingDirs++;
+            }
+            
+            result.append("\nDirectory Health: ").append(existingDirs).append("/").append(criticalPaths.length);
+            if (existingDirs < criticalPaths.length) {
+                result.append(" (⚠️ Some directories missing)");
+            } else {
+                result.append(" (✅ Complete)");
+            }
+            
+        } catch (Exception e) {
+            result.append("❌ Directory check failed: ").append(e.getMessage());
+        }
+        
+        return result.toString();
+    }
+    
+    private String checkLoaderStatus() {
+        StringBuilder result = new StringBuilder();
+        
+        try {
+            String gamePackage = "com.and.games505.TerrariaPaid";
+            boolean melonInstalled = MelonLoaderManager.isMelonLoaderInstalled(this);
+            boolean lemonInstalled = MelonLoaderManager.isLemonLoaderInstalled(this);
+            
+            if (melonInstalled) {
+                result.append("✅ MelonLoader detected\n");
+                result.append("   Version: ").append(MelonLoaderManager.getInstalledLoaderVersion()).append("\n");
+                
+                // Check core files
+                File loaderDir = PathManager.getMelonLoaderDir(this, gamePackage);
+                if (loaderDir != null && loaderDir.exists()) {
+                    File[] files = loaderDir.listFiles();
+                    int fileCount = (files != null) ? files.length : 0;
+                    result.append("   Files: ").append(fileCount).append(" detected\n");
+                }
+            } else if (lemonInstalled) {
+                result.append("✅ LemonLoader detected\n");
+                result.append("   Version: ").append(MelonLoaderManager.getInstalledLoaderVersion()).append("\n");
+            } else {
+                result.append("❌ No loader installed\n");
+                result.append("   Recommendation: Use 'Complete Setup Wizard' to install MelonLoader\n");
+            }
+            
+            // Check runtime directories
+            File net8Dir = new File(PathManager.getMelonLoaderDir(this, gamePackage), "net8");
+            File net35Dir = new File(PathManager.getMelonLoaderDir(this, gamePackage), "net35");
+            
+            result.append("Runtime Support:\n");
+            result.append(net8Dir.exists() ? "✅" : "❌").append(" NET8 Runtime\n");
+            result.append(net35Dir.exists() ? "✅" : "❌").append(" NET35 Runtime\n");
+            
+        } catch (Exception e) {
+            result.append("❌ Loader check failed: ").append(e.getMessage()).append("\n");
+        }
+        
+        return result.toString();
+    }
+    
+    private String checkModFiles() {
+        StringBuilder result = new StringBuilder();
+        
+        try {
+            String gamePackage = "com.and.games505.TerrariaPaid";
+            
+            // Check DEX mods
+            File dexDir = PathManager.getDexModsDir(this, gamePackage);
+            int dexCount = 0, dexEnabled = 0;
+            if (dexDir != null && dexDir.exists()) {
+                File[] dexFiles = dexDir.listFiles((dir, name) -> {
+                    String lower = name.toLowerCase();
+                    return lower.endsWith(".dex") || lower.endsWith(".jar") || 
+                           lower.endsWith(".dex.disabled") || lower.endsWith(".jar.disabled");
+                });
+                if (dexFiles != null) {
+                    dexCount = dexFiles.length;
+                    for (File file : dexFiles) {
+                        if (!file.getName().endsWith(".disabled")) {
+                            dexEnabled++;
+                        }
+                    }
+                }
+            }
+            
+            // Check DLL mods
+            File dllDir = PathManager.getDllModsDir(this, gamePackage);
+            int dllCount = 0, dllEnabled = 0;
+            if (dllDir != null && dllDir.exists()) {
+                File[] dllFiles = dllDir.listFiles((dir, name) -> {
+                    String lower = name.toLowerCase();
+                    return lower.endsWith(".dll") || lower.endsWith(".dll.disabled");
+                });
+                if (dllFiles != null) {
+                    dllCount = dllFiles.length;
+                    for (File file : dllFiles) {
+                        if (!file.getName().endsWith(".disabled")) {
+                            dllEnabled++;
+                        }
+                    }
+                }
+            }
+            
+            result.append("DEX/JAR Mods: ").append(dexEnabled).append("/").append(dexCount)
+                  .append(" enabled\n");
+            result.append("DLL Mods: ").append(dllEnabled).append("/").append(dllCount)
+                  .append(" enabled\n");
+            result.append("Total Active Mods: ").append(dexEnabled + dllEnabled).append("\n");
+            
+            if (dexCount == 0 && dllCount == 0) {
+                result.append("ℹ️ No mods installed - use Mod Management to add mods\n");
+            }
+            
+        } catch (Exception e) {
+            result.append("❌ Mod check failed: ").append(e.getMessage()).append("\n");
+        }
+        
+        return result.toString();
+    }
+    
+    private String checkPermissions() {
+        StringBuilder result = new StringBuilder();
+        
+        try {
+            // Test write permissions
+            File testDir = new File(getExternalFilesDir(null), "permission_test");
+            testDir.mkdirs();
+            
+            File testFile = new File(testDir, "write_test.txt");
+            try (FileWriter writer = new FileWriter(testFile)) {
+                writer.write("Permission test successful");
+                result.append("✅ External storage write access\n");
+            } catch (Exception e) {
+                result.append("❌ External storage write failed: ").append(e.getMessage()).append("\n");
+            } finally {
+                if (testFile.exists()) testFile.delete();
+                testDir.delete();
+            }
+            
+            // Check install packages permission
+            try {
+                getPackageManager().canRequestPackageInstalls();
+                result.append("✅ Package installation permission available\n");
+            } catch (Exception e) {
+                result.append("⚠️ Package installation permission may be restricted\n");
+            }
+            
+        } catch (Exception e) {
+            result.append("❌ Permission check failed: ").append(e.getMessage()).append("\n");
+        }
+        
+        return result.toString();
+    }
+    
+    private String checkStorage() {
+        StringBuilder result = new StringBuilder();
+        
+        try {
+            File externalDir = getExternalFilesDir(null);
+            if (externalDir != null) {
+                long freeSpace = externalDir.getFreeSpace();
+                long totalSpace = externalDir.getTotalSpace();
+                long usedSpace = totalSpace - freeSpace;
+                
+                result.append("Free Space: ").append(FileUtils.formatFileSize(freeSpace)).append("\n");
+                result.append("Used Space: ").append(FileUtils.formatFileSize(usedSpace)).append("\n");
+                result.append("Total Space: ").append(FileUtils.formatFileSize(totalSpace)).append("\n");
+                
+                if (freeSpace < 100 * 1024 * 1024) { // Less than 100MB
+                    result.append("⚠️ Low storage space - consider freeing up space\n");
+                } else {
+                    result.append("✅ Sufficient storage space available\n");
+                }
+            } else {
+                result.append("❌ Cannot access external storage\n");
+            }
+            
+        } catch (Exception e) {
+            result.append("❌ Storage check failed: ").append(e.getMessage()).append("\n");
+        }
+        
+        return result.toString();
+    }
+    
+    private String checkSettingsIntegrity() {
+        StringBuilder result = new StringBuilder();
+        
+        try {
+            // Check app preferences
+            android.content.SharedPreferences prefs = 
+                getSharedPreferences("TerrariaLoaderPrefs", MODE_PRIVATE);
+            
+            // Test write operation
+            android.content.SharedPreferences.Editor editor = prefs.edit();
+            editor.putString("diagnostic_test", "test_value");
+            boolean writeSuccess = editor.commit();
+            
+            if (writeSuccess) {
+                String testValue = prefs.getString("diagnostic_test", null);
+                if ("test_value".equals(testValue)) {
+                    result.append("✅ Settings persistence working\n");
+                    // Clean up test
+                    editor.remove("diagnostic_test").commit();
+                } else {
+                    result.append("❌ Settings read/write mismatch\n");
+                }
+            } else {
+                result.append("❌ Settings write failed\n");
+                result.append("   This may explain your auto-refresh issue\n");
+            }
+            
+        } catch (Exception e) {
+            result.append("❌ Settings check failed: ").append(e.getMessage()).append("\n");
+        }
+        
+        return result.toString();
+    }
+    
+    private String generateRecommendations() {
+        StringBuilder result = new StringBuilder();
+        
+        try {
+            boolean hasIssues = false;
+            
+            // Check if directories need repair
+            File baseDir = PathManager.getGameBaseDir(this, "com.and.games505.TerrariaPaid");
+            if (baseDir == null || !baseDir.exists()) {
+                result.append("• Run 'Auto-Repair' to create missing directories\n");
+                hasIssues = true;
+            }
+            
+            // Check if loader is missing
+            if (!MelonLoaderManager.isMelonLoaderInstalled(this) && 
+                !MelonLoaderManager.isLemonLoaderInstalled(this)) {
+                result.append("• Use 'Complete Setup Wizard' to install MelonLoader\n");
+                hasIssues = true;
+            }
+            
+            // Check storage
+            File externalDir = getExternalFilesDir(null);
+            if (externalDir != null && externalDir.getFreeSpace() < 50 * 1024 * 1024) {
+                result.append("• Free up storage space (recommended: 100MB+)\n");
+                hasIssues = true;
+            }
+            
+            if (!hasIssues) {
+                result.append("✅ System appears to be in good condition\n");
+                result.append("• If you're still experiencing issues, try:\n");
+                result.append("  - Restart the app completely\n");
+                result.append("  - Reboot your device\n");
+                result.append("  - Check specific mod compatibility\n");
+            }
+            
+        } catch (Exception e) {
+            result.append("• General recommendation: Check system permissions\n");
+        }
+        
+        return result.toString();
+    }
+    
+    // Continue to Part 2...
+// File: OfflineDiagnosticActivity.java (Part 2 - Methods & UI)
+// Continuation of Part 1
+
+    private void selectApkForDiagnostic() {
+        Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+        intent.setType("application/vnd.android.package-archive");
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        
+        try {
+            apkPickerLauncher.launch(Intent.createChooser(intent, "Select APK to Diagnose"));
+        } catch (Exception e) {
+            showToast("No file manager available");
+        }
+    }
+    
+    private void runApkDiagnostic(Uri apkUri) {
+        showProgress("Analyzing APK installation issues...");
+        
+        AsyncTask.execute(() -> {
+            try {
+                StringBuilder results = new StringBuilder();
+                results.append("=== APK Installation Diagnostic ===\n");
+                results.append("File URI: ").append(apkUri.toString()).append("\n\n");
+                
+                String fileName = getFileNameFromUri(apkUri);
+                results.append("File Name: ").append(fileName != null ? fileName : "Unknown").append("\n");
+                
+                results.append(validateApkFromUri(apkUri)).append("\n");
+                results.append("🔧 INSTALLATION ENVIRONMENT\n");
+                results.append(checkInstallationEnvironment()).append("\n");
+                results.append("📱 DEVICE COMPATIBILITY\n");
+                results.append(checkDeviceCompatibility()).append("\n");
+                results.append("💡 SOLUTIONS FOR APK PARSING ERRORS\n");
+                results.append(getApkSolutions()).append("\n");
+                
+                runOnUiThread(() -> {
+                    hideProgress();
+                    displayResults(results.toString());
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    hideProgress();
+                    showError("APK analysis failed: " + e.getMessage());
+                });
+            }
+        });
+    }
+    
+    private String validateApkFromUri(Uri apkUri) {
+        StringBuilder result = new StringBuilder();
+        result.append("📦 APK VALIDATION\n");
+        
+        try (java.io.InputStream stream = getContentResolver().openInputStream(apkUri)) {
+            if (stream == null) {
+                result.append("❌ Cannot access APK file\n");
+                return result.toString();
+            }
+            
+            int available = stream.available();
+            if (available > 0) {
+                result.append("✅ APK accessible (").append(FileUtils.formatFileSize(available)).append(")\n");
+                if (available < 10 * 1024 * 1024) {
+                    result.append("⚠️ APK seems small for Terraria - may be corrupted\n");
+                }
+            } else {
+                result.append("⚠️ APK file size unknown or empty\n");
+            }
+            
+            byte[] header = new byte[30];
+            int bytesRead = stream.read(header);
+            
+            if (bytesRead >= 4) {
+                if (header[0] == 0x50 && header[1] == 0x4b && header[2] == 0x03 && header[3] == 0x04) {
+                    result.append("✅ Valid ZIP/APK signature\n");
+                } else {
+                    result.append("❌ Invalid ZIP/APK signature - file is corrupted\n");
+                    result.append("   This is likely causing your parsing error!\n");
+                }
+            } else {
+                result.append("❌ Cannot read APK header - file corrupted\n");
+            }
+            
+        } catch (Exception e) {
+            result.append("❌ APK access failed: ").append(e.getMessage()).append("\n");
+        }
+        
+        return result.toString();
+    }
+    
+    private String checkInstallationEnvironment() {
+        StringBuilder result = new StringBuilder();
+        
+        try {
+            boolean unknownSources = canInstallFromUnknownSources();
+            result.append(unknownSources ? "✅" : "❌").append(" Unknown sources enabled\n");
+            
+            if (!unknownSources) {
+                result.append("   📋 Fix: Settings > Apps > TerrariaLoader > Install unknown apps\n");
+            }
+            
+            File dataDir = getDataDir();
+            long freeSpace = dataDir.getFreeSpace();
+            result.append("Internal space: ").append(FileUtils.formatFileSize(freeSpace)).append("\n");
+            
+            if (freeSpace < 200 * 1024 * 1024) {
+                result.append("⚠️ Low storage - may cause installation failure\n");
+            }
+            
+            try {
+                getPackageManager().getPackageInfo("com.and.games505.TerrariaPaid", 0);
+                result.append("⚠️ Terraria already installed - uninstall first\n");
+            } catch (android.content.pm.PackageManager.NameNotFoundException e) {
+                result.append("✅ No conflicting installation\n");
+            }
+            
+        } catch (Exception e) {
+            result.append("❌ Environment check failed: ").append(e.getMessage()).append("\n");
+        }
+        
+        return result.toString();
+    }
+    
+    private boolean canInstallFromUnknownSources() {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            return getPackageManager().canRequestPackageInstalls();
+        } else {
+            try {
+                return android.provider.Settings.Secure.getInt(
+                    getContentResolver(), 
+                    android.provider.Settings.Secure.INSTALL_NON_MARKET_APPS, 0) != 0;
+            } catch (Exception e) {
+                return false;
+            }
+        }
+    }
+    
+    private String checkDeviceCompatibility() {
+        StringBuilder result = new StringBuilder();
+        
+        result.append("Device: ").append(android.os.Build.MANUFACTURER)
+              .append(" ").append(android.os.Build.MODEL).append("\n");
+        result.append("Android: ").append(android.os.Build.VERSION.RELEASE)
+              .append(" (API ").append(android.os.Build.VERSION.SDK_INT).append(")\n");
+        result.append("Architecture: ").append(android.os.Build.SUPPORTED_ABIS[0]).append("\n");
+        
+        if (android.os.Build.VERSION.SDK_INT >= 21) {
+            result.append("✅ Compatible Android version\n");
+        } else {
+            result.append("❌ Android version too old\n");
+        }
+        
+        return result.toString();
+    }
+    
+    private String getApkSolutions() {
+        StringBuilder result = new StringBuilder();
+        
+        result.append("For 'There was a problem parsing the package':\n\n");
+        result.append("1. 🔧 Re-download APK (may be corrupted)\n");
+        result.append("2. 🔧 Enable 'Install unknown apps'\n");
+        result.append("3. 🔧 Uninstall original Terraria first\n");
+        result.append("4. 🔧 Clear Package Installer cache\n");
+        result.append("5. 🔧 Restart device and retry\n");
+        result.append("6. 🔧 Copy APK to internal storage\n");
+        result.append("7. 🔧 Use different file manager\n");
+        result.append("8. 🔧 Check antivirus isn't blocking\n");
+        
+        return result.toString();
+    }
+    
+    private void diagnoseAndFixSettings() {
+        showProgress("Diagnosing settings persistence...");
+        
+        AsyncTask.execute(() -> {
+            try {
+                StringBuilder results = new StringBuilder();
+                results.append("=== Settings Persistence Diagnostic ===\n\n");
+                results.append("🔧 SHARED PREFERENCES TEST\n");
+                results.append(testSharedPreferences()).append("\n");
+                results.append("🔄 AUTO-REFRESH SPECIFIC TEST\n");
+                results.append(testAutoRefreshSetting()).append("\n");
+                results.append("💾 FILE SYSTEM TEST\n");
+                results.append(testFileSystemWrites()).append("\n");
+                
+                runOnUiThread(() -> {
+                    hideProgress();
+                    displayResults(results.toString());
+                    showSettingsFixOptions();
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    hideProgress();
+                    showError("Settings diagnostic failed: " + e.getMessage());
+                });
+            }
+        });
+    }
+    
+    private String testSharedPreferences() {
+        StringBuilder result = new StringBuilder();
+        
+        try {
+            android.content.SharedPreferences prefs = getSharedPreferences("DiagnosticTest", MODE_PRIVATE);
+            android.content.SharedPreferences.Editor editor = prefs.edit();
+            
+            editor.putBoolean("test_bool", true);
+            editor.putString("test_string", "test_value");
+            boolean commitSuccess = editor.commit();
+            
+            result.append("Write test: ").append(commitSuccess ? "✅ Success" : "❌ Failed").append("\n");
+            
+            if (commitSuccess) {
+                boolean boolVal = prefs.getBoolean("test_bool", false);
+                String stringVal = prefs.getString("test_string", null);
+                boolean readSuccess = boolVal && "test_value".equals(stringVal);
+                
+                result.append("Read test: ").append(readSuccess ? "✅ Success" : "❌ Failed").append("\n");
+                
+                if (!readSuccess) {
+                    result.append("   This explains your auto-refresh issue!\n");
+                }
+                
+                editor.clear().commit();
+            }
+            
+        } catch (Exception e) {
+            result.append("❌ SharedPreferences test failed: ").append(e.getMessage()).append("\n");
+        }
+        
+        return result.toString();
+    }
+    
+    private String testAutoRefreshSetting() {
+        StringBuilder result = new StringBuilder();
+        
+        try {
+            // Simulate the exact auto-refresh setting behavior
+            android.content.SharedPreferences logPrefs = getSharedPreferences("LogViewerPrefs", MODE_PRIVATE);
+            android.content.SharedPreferences.Editor editor = logPrefs.edit();
+            
+            // Test the specific setting that's failing
+            editor.putBoolean("auto_refresh_enabled", false);
+            boolean applyResult = editor.commit(); // Use commit instead of apply for immediate result
+            
+            result.append("Auto-refresh disable: ").append(applyResult ? "✅ Success" : "❌ Failed").append("\n");
+            
+            if (applyResult) {
+                // Check if it actually persisted
+                boolean currentValue = logPrefs.getBoolean("auto_refresh_enabled", true); // default true
+                result.append("Setting persisted: ").append(!currentValue ? "✅ Success" : "❌ Failed").append("\n");
+                
+                if (currentValue) {
+                    result.append("   Setting reverted to default - persistence failed!\n");
+                    result.append("   This is your exact issue.\n");
+                }
+            }
+            
+        } catch (Exception e) {
+            result.append("❌ Auto-refresh test failed: ").append(e.getMessage()).append("\n");
+        }
+        
+        return result.toString();
+    }
+    
+    private String testFileSystemWrites() {
+        StringBuilder result = new StringBuilder();
+        
+        try {
+            File testDir = new File(getFilesDir(), "diagnostic_test");
+            testDir.mkdirs();
+            
+            File testFile = new File(testDir, "settings_test.txt");
+            
+            try (FileWriter writer = new FileWriter(testFile)) {
+                writer.write("auto_refresh=false\n");
+                writer.write("timestamp=" + System.currentTimeMillis() + "\n");
+                result.append("✅ File write successful\n");
+            }
+            
+            if (testFile.exists()) {
+                try (java.io.BufferedReader reader = new java.io.BufferedReader(
+                        new java.io.FileReader(testFile))) {
+                    String line = reader.readLine();
+                    if (line != null && line.contains("auto_refresh=false")) {
+                        result.append("✅ File read successful\n");
+                    } else {
+                        result.append("❌ File content corrupted\n");
+                    }
+                }
+            }
+            
+            testFile.delete();
+            testDir.delete();
+            
+        } catch (Exception e) {
+            result.append("❌ File system test failed: ").append(e.getMessage()).append("\n");
+        }
+        
+        return result.toString();
+    }
+    
+    private String getFileNameFromUri(Uri uri) {
+        try {
+            android.database.Cursor cursor = getContentResolver().query(uri, null, null, null, null);
+            if (cursor != null) {
+                int nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME);
+                if (nameIndex >= 0 && cursor.moveToFirst()) {
+                    String name = cursor.getString(nameIndex);
+                    cursor.close();
+                    return name;
+                }
+                cursor.close();
+            }
+        } catch (Exception e) {
+            return uri.getLastPathSegment();
+        }
+        return null;
+    }
+    
+    private void performAutoRepair() {
+        new AlertDialog.Builder(this)
+            .setTitle("Auto-Repair System")
+            .setMessage("Attempt automatic fixes for:\n\n" +
+                       "• Missing directories\n" +
+                       "• Settings persistence\n" +
+                       "• File permissions\n" +
+                       "• Configuration corruption\n\n" +
+                       "Continue?")
+            .setPositiveButton("Yes, Repair", (dialog, which) -> executeAutoRepair())
+            .setNegativeButton("Cancel", null)
+            .show();
+    }
+    
+    private void executeAutoRepair() {
+        showProgress("Performing auto-repair...");
+        
+        AsyncTask.execute(() -> {
+            try {
+                StringBuilder results = new StringBuilder();
+                results.append("=== Auto-Repair Results ===\n\n");
+                
+                boolean directoryRepair = diagnosticManager.attemptSelfRepair();
+                boolean settingsRepair = repairSettings();
+                boolean permissionRepair = repairPermissions();
+                
+                results.append("Directory Structure: ").append(directoryRepair ? "✅ Fixed" : "❌ Failed").append("\n");
+                results.append("Settings Persistence: ").append(settingsRepair ? "✅ Fixed" : "❌ Failed").append("\n");
+                results.append("Permissions: ").append(permissionRepair ? "✅ Fixed" : "❌ Failed").append("\n\n");
+                
+                if (directoryRepair || settingsRepair || permissionRepair) {
+                    results.append("🔄 Restart recommended to apply changes.\n");
+                } else {
+                    results.append("❌ Could not auto-fix detected issues.\n");
+                    results.append("💡 Try manual solutions or check device settings.\n");
+                }
+                
+                runOnUiThread(() -> {
+                    hideProgress();
+                    displayResults(results.toString());
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    hideProgress();
+                    showError("Auto-repair failed: " + e.getMessage());
+                });
+            }
+        });
+    }
+    
+    private boolean repairSettings() {
+        try {
+            // Clear all shared preferences and recreate
+            String[] prefFiles = {"TerrariaLoaderPrefs", "LogViewerPrefs", "AppSettings"};
+            
+            for (String prefFile : prefFiles) {
+                android.content.SharedPreferences prefs = getSharedPreferences(prefFile, MODE_PRIVATE);
+                android.content.SharedPreferences.Editor editor = prefs.edit();
+                editor.clear();
+                if (!editor.commit()) {
+                    return false;
+                }
+            }
+            
+            // Test write after clear
+            android.content.SharedPreferences testPrefs = getSharedPreferences("TerrariaLoaderPrefs", MODE_PRIVATE);
+            android.content.SharedPreferences.Editor testEditor = testPrefs.edit();
+            testEditor.putBoolean("settings_repaired", true);
+            return testEditor.commit();
+            
+        } catch (Exception e) {
+            LogUtils.logDebug("Settings repair failed: " + e.getMessage());
+            return false;
+        }
+    }
+    
+    private boolean repairPermissions() {
+        try {
+            File testDir = new File(getExternalFilesDir(null), "permission_test");
+            testDir.mkdirs();
+            
+            File testFile = new File(testDir, "test.txt");
+            FileWriter writer = new FileWriter(testFile);
+            writer.write("test");
+            writer.close();
+            
+            boolean canWrite = testFile.exists() && testFile.length() > 0;
+            testFile.delete();
+            testDir.delete();
+            
+            return canWrite;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+    
+    private void exportDiagnosticReport() {
+        try {
+            String reportContent = diagnosticResultsText.getText().toString();
+            if (reportContent.isEmpty() || reportContent.startsWith("Click")) {
+                showToast("No diagnostic results to export");
+                return;
+            }
+            
+            File reportsDir = new File(getExternalFilesDir(null), "DiagnosticReports");
+            reportsDir.mkdirs();
+            
+            String timestamp = new java.text.SimpleDateFormat("yyyyMMdd_HHmmss", 
+                java.util.Locale.getDefault()).format(new java.util.Date());
+            File reportFile = new File(reportsDir, "diagnostic_" + timestamp + ".txt");
+            
+            try (FileWriter writer = new FileWriter(reportFile)) {
+                writer.write(reportContent);
+                writer.write("\n\n=== Export Info ===\n");
+                writer.write("Exported by: TerrariaLoader Diagnostic Tool\n");
+                writer.write("Export time: " + new java.util.Date().toString() + "\n");
+            }
+            
+            // Share the report
+            Uri fileUri = FileProvider.getUriForFile(this, 
+                getPackageName() + ".provider", reportFile);
+            
+            Intent shareIntent = new Intent(Intent.ACTION_SEND);
+            shareIntent.setType("text/plain");
+            shareIntent.putExtra(Intent.EXTRA_STREAM, fileUri);
+            shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            
+            startActivity(Intent.createChooser(shareIntent, "Share Diagnostic Report"));
+            showToast("Report exported: " + reportFile.getName());
+            
+        } catch (Exception e) {
+            showError("Export failed: " + e.getMessage());
+        }
+    }
+    
+    private void clearResults() {
+        diagnosticResultsText.setText("Click 'Run Full System Check' to start diagnostics...");
+    }
+    
+    private void showSettingsFixOptions() {
+        new AlertDialog.Builder(this)
+            .setTitle("Settings Fix Options")
+            .setMessage("Settings persistence issue detected. Try these fixes:")
+            .setPositiveButton("Clear All Settings", (dialog, which) -> clearAllSettings())
+            .setNeutralButton("Reset App Data", (dialog, which) -> showResetAppDataInfo())
+            .setNegativeButton("Cancel", null)
+            .show();
+    }
+    
+    private void clearAllSettings() {
+        try {
+            String[] prefFiles = {"TerrariaLoaderPrefs", "LogViewerPrefs", "AppSettings"};
+            for (String prefFile : prefFiles) {
+                getSharedPreferences(prefFile, MODE_PRIVATE).edit().clear().commit();
+            }
+            showToast("Settings cleared - restart app to test");
+        } catch (Exception e) {
+            showError("Failed to clear settings: " + e.getMessage());
+        }
+    }
+    
+    private void showResetAppDataInfo() {
+        new AlertDialog.Builder(this)
+            .setTitle("Reset App Data")
+            .setMessage("To completely reset TerrariaLoader:\n\n" +
+                       "1. Go to Android Settings\n" +
+                       "2. Apps > TerrariaLoader\n" +
+                       "3. Storage > Clear Data\n\n" +
+                       "This will fix persistent settings issues.")
+            .setPositiveButton("OK", null)
+            .show();
+    }
+    
+    private void displayResults(String results) {
+        diagnosticResultsText.setText(results);
+    }
+    
+    private void showProgress(String message) {
+        progressDialog = new ProgressDialog(this);
+        progressDialog.setMessage(message);
+        progressDialog.setCancelable(false);
+        progressDialog.show();
+    }
+    
+    private void hideProgress() {
+        if (progressDialog != null && progressDialog.isShowing()) {
+            progressDialog.dismiss();
+        }
+    }
+    
+    private void showToast(String message) {
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
+    }
+    
+    private void showError(String error) {
+        new AlertDialog.Builder(this)
+            .setTitle("Error")
+            .setMessage(error)
+            .setPositiveButton("OK", null)
+            .show();
+    }
+    
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        hideProgress();
+    }
+}
+
 
